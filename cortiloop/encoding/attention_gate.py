@@ -110,9 +110,10 @@ class AttentionGate:
         char_count = len(text.strip())
         if char_count < 5:
             return 0.1
-        length_score = min(char_count / 100, 1.0)
+        # 20+ chars = 0.4+, 50+ chars = 1.0 — most real sentences qualify
+        length_score = min(char_count / 50, 1.0)
         # If few existing entities, everything is novel
-        entity_bonus = 1.0 if existing_entity_count < 10 else 0.5
+        entity_bonus = 1.0 if existing_entity_count < 10 else 0.6
         return min(length_score * entity_bonus, 1.0)
 
     @staticmethod
