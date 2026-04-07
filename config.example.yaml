@@ -1,0 +1,84 @@
+# CortiLoop Configuration Example
+# Copy to config.yaml and adjust as needed.
+
+db_path: "cortiloop.db"          # SQLite: file path | Postgres: connection string
+namespace: "default"
+storage_backend: "sqlite"         # "sqlite" | "postgres"
+vector_backend: "auto"            # "auto" | "numpy" | "usearch" (sqlite only; postgres uses pgvector)
+
+# --- PostgreSQL example ---
+# db_path: "postgresql://user:pass@localhost:5432/cortiloop"
+# storage_backend: "postgres"
+
+llm:
+  provider: "openai"              # "openai" | "anthropic" | "ollama" | "litellm"
+  model: "gpt-4o-mini"
+  embedding_model: "text-embedding-3-small"
+  embedding_dim: 1536
+  api_key: ""                     # reads from OPENAI_API_KEY env var if empty
+  base_url: ""                    # custom endpoint (e.g. Ollama: http://localhost:11434/v1)
+  rerank_model: ""                # optional dedicated reranker (e.g. "rerank-english-v3.0")
+
+# --- Ollama example (local, no API key needed) ---
+# llm:
+#   provider: "ollama"
+#   model: "llama3.1"
+#   embedding_model: "nomic-embed-text"
+#   embedding_dim: 768
+#   base_url: "http://localhost:11434/v1"
+
+# --- litellm example (universal adapter, 100+ models) ---
+# llm:
+#   provider: "litellm"
+#   model: "anthropic/claude-sonnet-4-20250514"
+#   embedding_model: "text-embedding-3-small"
+#   embedding_dim: 1536
+
+attention_gate:
+  enabled: true
+  threshold: 0.2                  # below this → skip (don't remember)
+  weights:
+    novelty: 0.25                 # how different from existing memories
+    correction: 0.30              # "不对/应该是" → strongest signal
+    explicit_mark: 0.20           # "记住/remember" → explicit request
+    emotional_intensity: 0.10     # emotional content
+    task_relevance: 0.15          # relevance to current task
+
+decay:
+  episodic_rate: 0.1              # episodic memories decay fast
+  semantic_rate: 0.03             # observations decay moderately
+  procedural_rate: 0.005          # skills/habits decay very slowly
+  access_boost: 0.3              # retrieval strengthens memory
+  archive_threshold: 0.3          # below → archived
+  cold_threshold: 0.1             # below → cold storage
+
+consolidation:
+  synaptic_enabled: true          # immediate fact→observation
+  systems_enabled: true           # deep cross-session consolidation
+  systems_interval_seconds: 3600  # background worker interval (1 hour)
+  max_units_per_batch: 50
+  observation_single_dimension: true
+
+retrieval:
+  semantic_weight: 0.4
+  keyword_weight: 0.2
+  graph_weight: 0.25
+  temporal_weight: 0.15
+  max_results: 20
+  spreading_activation_hops: 2
+  spreading_decay_factor: 0.5
+  rerank_enabled: false           # enable cross-encoder reranking
+  rerank_top_k: 50                # how many candidates to rerank
+
+forgetting:
+  enabled: true
+  prune_interval_seconds: 7200
+  merge_similarity_threshold: 0.92
+  max_memory_units: 100000
+  max_observations: 10000
+
+# Multi-tenant authentication (optional)
+auth:
+  enabled: false
+  api_keys: {}                    # key → namespace mapping, e.g. {"cl_abc123": "tenant_a"}
+  admin_key: ""                   # admin key for cross-namespace operations
