@@ -72,6 +72,74 @@ function escapeForPrompt(text: string): string {
   );
 }
 
+// ============================================================================
+// Auto-Capture Helpers (module-level to avoid function-in-block issues)
+// ============================================================================
+
+function extractTextBlocks(content: unknown): string[] {
+  const out: string[] = [];
+  if (typeof content === "string") { out.push(content); }
+  else if (Array.isArray(content)) {
+    for (const b of content) {
+      if (!b || typeof b !== "object") continue;
+      const block = b as Record<string, unknown>;
+      if (block.type === "text" && typeof block.text === "string") {
+        out.push(block.text);
+      }
+    }
+  }
+  return out;
+}
+
+function extractToolUseBlocks(content: unknown): Array<{ name: string; input: unknown }> {
+  const out: Array<{ name: string; input: unknown }> = [];
+  if (!Array.isArray(content)) return out;
+  for (const b of content) {
+    if (!b || typeof b !== "object") continue;
+    const block = b as Record<string, unknown>;
+    if (block.type === "tool_use" && typeof block.name === "string") {
+      out.push({ name: block.name as string, input: block.input });
+    }
+  }
+  return out;
+}
+
+function extractToolResultText(content: unknown): string[] {
+  const out: string[] = [];
+  if (typeof content === "string") { out.push(content); }
+  else if (Array.isArray(content)) {
+    for (const b of content) {
+      if (!b || typeof b !== "object") continue;
+      const block = b as Record<string, unknown>;
+      if (block.type === "tool_result" && typeof block.content === "string") {
+        out.push(block.content);
+      } else if (block.type === "tool_result" && Array.isArray(block.content)) {
+        out.push(...extractTextBlocks(block.content));
+      } else if (block.type === "text" && typeof block.text === "string") {
+        out.push(block.text);
+      }
+    }
+  }
+  return out;
+}
+
+function isSystemNoise(t: string): boolean {
+  if (t.length < 10) return true;
+  if (INJECTION_PATTERNS.some((p) => p.test(t))) return true;
+  if (/^\s*\[?(current|local)\s*(time|date|datetime)/i.test(t)) return true;
+  if (/HEARTBEAT/i.test(t)) return true;
+  if (/^\s*(You are|Your role|System:|Instructions:)/i.test(t)) return true;
+  if (/^(Mon|Tue|Wed|Thu|Fri|Sat|Sun)\w*,\s+\w+\s+\d+/i.test(t)) return true;
+  if (/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}/.test(t)) return true;
+  if (/^<[a-z-]+(>|\s)[\s\S]*<\/[a-z-]+>$/is.test(t)) return true;
+  return false;
+}
+
+function truncateText(text: string, maxChars: number): string {
+  if (text.length <= maxChars) return text;
+  return text.slice(0, maxChars);
+}
+
 function formatMemoriesContext(memories: Array<{ content: string; score?: number }>): string {
   const lines = memories.map(
     (m, i) => `${i + 1}. ${escapeForPrompt(m.content)}${m.score ? ` (${(m.score * 100).toFixed(0)}%)` : ""}`,
@@ -268,48 +336,75 @@ export default definePluginEntry({
         if (!event.success || !event.messages?.length) return;
 
         try {
-          // Only capture the LAST user message (the actual prompt), not system-injected context
-          const texts: string[] = [];
-          let lastUserMsg: Record<string, unknown> | null = null;
-          for (const msg of event.messages) {
-            if (!msg || typeof msg !== "object") continue;
-            const m = msg as Record<string, unknown>;
-            if (m.role === "user") lastUserMsg = m;
+          const maxChars = cfg.captureMaxChars;
+          const messages = event.messages as Array<Record<string, unknown>>;
+
+          // Find the last user message index — everything from there is the current turn
+          let lastUserIdx = -1;
+          for (let i = messages.length - 1; i >= 0; i--) {
+            if (messages[i]?.role === "user") { lastUserIdx = i; break; }
           }
-          if (lastUserMsg) {
-            const content = lastUserMsg.content;
-            if (typeof content === "string") { texts.push(content); }
-            else if (Array.isArray(content)) {
-              for (const b of content) {
-                if (b && typeof b === "object" && (b as any).type === "text" && typeof (b as any).text === "string") {
-                  texts.push((b as any).text);
+          if (lastUserIdx < 0) return;
+
+          const turnMessages = messages.slice(lastUserIdx);
+          const toRetain: string[] = [];
+
+          for (const msg of turnMessages) {
+            if (!msg || typeof msg !== "object") continue;
+            const role = msg.role as string;
+
+            if (role === "user") {
+              // User message: strip injected memory context, filter noise
+              const texts = extractTextBlocks(msg.content);
+              const cleaned = texts
+                .map((t) => t.replace(/<relevant-memories>[\s\S]*?<\/relevant-memories>\s*/g, "").trim())
+                .filter(Boolean)
+                .filter((t) => !isSystemNoise(t));
+              for (const t of cleaned) {
+                toRetain.push(truncateText(`[user] ${t}`, maxChars));
+              }
+            }
+
+            else if (role === "assistant") {
+              // Assistant text blocks
+              const texts = extractTextBlocks(msg.content);
+              const joined = texts.join("\n").trim();
+              if (joined.length >= 50 && !isSystemNoise(joined)) {
+                toRetain.push(truncateText(`[assistant] ${joined}`, maxChars));
+              }
+
+              // Tool calls — record what tools were invoked and with what intent
+              const toolCalls = extractToolUseBlocks(msg.content);
+              for (const tc of toolCalls) {
+                // Skip cortiloop tools to avoid self-referential loops
+                if (tc.name.startsWith("cortiloop_")) continue;
+                const inputStr = typeof tc.input === "string" ? tc.input : JSON.stringify(tc.input ?? {});
+                const summary = `[tool_call] ${tc.name}: ${inputStr}`;
+                if (summary.length >= 20) {
+                  toRetain.push(truncateText(summary, maxChars));
                 }
+              }
+            }
+
+            else if (role === "tool") {
+              // Tool results — capture execution output
+              const toolName = (msg.name ?? msg.tool_name ?? "") as string;
+              // Skip cortiloop tool results
+              if (toolName.startsWith("cortiloop_")) continue;
+              const results = extractToolResultText(msg.content);
+              const joined = results.join("\n").trim();
+              if (joined.length >= 20 && !isSystemNoise(joined)) {
+                const summary = `[tool_result:${toolName}] ${joined}`;
+                toRetain.push(truncateText(summary, maxChars));
               }
             }
           }
 
-          // Strip injected memory context from text (prependContext merges into user message)
-          const cleaned = texts.map((t) => t.replace(/<relevant-memories>[\s\S]*?<\/relevant-memories>\s*/g, "").trim()).filter(Boolean);
+          if (!toRetain.length) return;
 
-          const toCapture = cleaned.filter((t) => {
-            if (t.length < 10 || t.length > cfg.captureMaxChars) return false;
-            // Skip prompt injection
-            if (INJECTION_PATTERNS.some((p) => p.test(t))) return false;
-            // Skip system-injected context (timestamps, heartbeat, workspace paths, system instructions)
-            if (/^\s*\[?(current|local)\s*(time|date|datetime)/i.test(t)) return false;
-            if (/HEARTBEAT/i.test(t)) return false;
-            if (/^\s*(You are|Your role|System:|Instructions:)/i.test(t)) return false;
-            if (/\/Users\/\S+\.(md|json|yaml|txt)\b/.test(t)) return false;
-            if (/^(Mon|Tue|Wed|Thu|Fri|Sat|Sun)\w*,\s+\w+\s+\d+/i.test(t)) return false;
-            if (/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}/.test(t)) return false;
-            // Skip XML/HTML-like system blocks
-            if (/^<[a-z-]+(>|\s)[\s\S]*<\/[a-z-]+>$/is.test(t)) return false;
-            return true;
-          });
-          if (!toCapture.length) return;
-
+          // Batch retain: send all pieces, cap at 10 per turn
           let stored = 0;
-          for (const text of toCapture.slice(0, 5)) {
+          for (const text of toRetain.slice(0, 10)) {
             try {
               await cortiloopPost(baseUrl, "/retain", { text });
               stored++;
@@ -317,7 +412,9 @@ export default definePluginEntry({
               api.logger.warn(`memory-cortiloop: retain failed: ${e}`);
             }
           }
-          if (stored > 0) api.logger.info(`memory-cortiloop: auto-captured ${stored} messages`);
+          if (stored > 0) {
+            api.logger.info(`memory-cortiloop: auto-captured ${stored}/${toRetain.length} turn segments`);
+          }
         } catch (err) {
           api.logger.warn(`memory-cortiloop: capture error: ${err}`);
         }
