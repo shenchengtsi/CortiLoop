@@ -115,7 +115,7 @@ for r in results:
     print(f"[{r['type']}] {r['content']} (score: {r['score']:.3f})")
 ```
 
-任何实现 `MemoryLLM` 协议的对象都可以：
+Agent 的 LLM 只需要 **chat 能力** — 仅 2 个方法：
 
 ```python
 from cortiloop import MemoryLLM
@@ -123,9 +123,12 @@ from cortiloop import MemoryLLM
 class MyAgentLLM:  # 实现 MemoryLLM 协议
     async def complete(self, system: str, user: str, response_format: str = "json") -> str: ...
     async def complete_json(self, system: str, user: str) -> dict: ...
-    async def embed(self, texts: list[str]) -> list[list[float]]: ...
-    async def embed_one(self, text: str) -> list[float]: ...
-    async def rerank(self, query: str, documents: list[str], top_k: int = 10) -> list[tuple[int, float]]: ...
+```
+
+Embedding 和 reranking 由 CortiLoop **内部处理**（内置 hash-based 嵌入 + 词重叠重排序）。如果 Agent 有独立的 embedding 服务，可以选择传入：
+
+```python
+loop = CortiLoop(llm=agent.llm, embedder=agent.embedder)  # 可选
 ```
 
 ### 独立使用（内置 LLM 配置）

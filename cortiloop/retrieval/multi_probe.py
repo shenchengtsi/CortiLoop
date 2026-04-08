@@ -17,7 +17,7 @@ from typing import Any
 
 from cortiloop.association.graph import AssociationGraph
 from cortiloop.config import RetrievalConfig
-from cortiloop.llm.protocol import MemoryLLM
+from cortiloop.llm.protocol import Embedder, Reranker
 from cortiloop.models import MemoryUnit, Observation, ProceduralMemory
 from cortiloop.storage.base_store import BaseStore
 
@@ -34,12 +34,14 @@ class MultiProbeRetriever:
         self,
         config: RetrievalConfig,
         store: BaseStore,
-        llm: MemoryLLM,
+        embedder: Embedder,
+        reranker: Reranker,
         graph: AssociationGraph,
     ):
         self.config = config
         self.store = store
-        self.llm = llm
+        self.embedder = embedder
+        self.reranker = reranker
         self.graph = graph
 
     async def recall(
@@ -52,7 +54,7 @@ class MultiProbeRetriever:
         Each result: {"id", "type", "content", "score", "entities"}
         """
         top_k = top_k or self.config.max_results
-        query_emb = await self.llm.embed_one(query)
+        query_emb = await self.embedder.embed_one(query)
 
         # Route 1: Semantic search (vector ANN)
         semantic_results = self._semantic_search(query_emb, top_k * 2)
@@ -100,7 +102,7 @@ class MultiProbeRetriever:
     async def _rerank(self, query: str, candidates: list[dict]) -> list[dict]:
         """Cross-encoder reranking via LLM."""
         documents = [c["content"] for c in candidates]
-        scored = await self.llm.rerank(query, documents, top_k=len(candidates))
+        scored = await self.reranker.rerank(query, documents, top_k=len(candidates))
 
         reranked = []
         for orig_idx, score in scored:

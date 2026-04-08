@@ -11,7 +11,7 @@ from __future__ import annotations
 from datetime import datetime
 
 from cortiloop.config import ConsolidationConfig
-from cortiloop.llm.protocol import MemoryLLM
+from cortiloop.llm.protocol import Embedder, MemoryLLM
 from cortiloop.models import MemoryUnit, Observation
 from cortiloop.storage.base_store import BaseStore
 
@@ -47,10 +47,11 @@ class SynapticConsolidator:
     Runs after each retain operation (async).
     """
 
-    def __init__(self, config: ConsolidationConfig, store: BaseStore, llm: MemoryLLM):
+    def __init__(self, config: ConsolidationConfig, store: BaseStore, llm: MemoryLLM, embedder: Embedder):
         self.config = config
         self.store = store
         self.llm = llm
+        self.embedder = embedder
 
     async def consolidate(self, new_units: list[MemoryUnit]):
         """Process new memory units into Observations."""
@@ -98,7 +99,7 @@ EXISTING OBSERVATIONS:
         now = datetime.utcnow()
         for action in result.get("actions", []):
             if action["type"] == "create":
-                embedding = await self.llm.embed_one(action["content"])
+                embedding = await self.embedder.embed_one(action["content"])
                 obs = Observation(
                     dimension=action.get("dimension", ""),
                     content=action["content"],
@@ -127,5 +128,5 @@ EXISTING OBSERVATIONS:
                     existing.updated_at = now
                     existing.source_unit_ids.extend(action.get("source_unit_ids", []))
                     existing.entities = list(set(existing.entities + action.get("entities", [])))
-                    existing.embedding = await self.llm.embed_one(action["content"])
+                    existing.embedding = await self.embedder.embed_one(action["content"])
                     self.store.insert_observation(existing)

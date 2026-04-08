@@ -14,7 +14,7 @@ from __future__ import annotations
 from datetime import datetime
 
 from cortiloop.config import ConsolidationConfig
-from cortiloop.llm.protocol import MemoryLLM
+from cortiloop.llm.protocol import Embedder, MemoryLLM
 from cortiloop.models import Observation, ProceduralMemory
 from cortiloop.storage.base_store import BaseStore
 
@@ -60,10 +60,11 @@ class SystemsConsolidator:
     The "sleep cycle" of the memory system.
     """
 
-    def __init__(self, config: ConsolidationConfig, store: BaseStore, llm: MemoryLLM):
+    def __init__(self, config: ConsolidationConfig, store: BaseStore, llm: MemoryLLM, embedder: Embedder):
         self.config = config
         self.store = store
         self.llm = llm
+        self.embedder = embedder
 
     async def run_deep_consolidation(self):
         """Full deep consolidation cycle. Call periodically."""
@@ -112,7 +113,7 @@ class SystemsConsolidator:
                     break
 
             if not matched and pat.get("confidence", 0) >= 0.3:
-                embedding = await self.llm.embed_one(pat["pattern"] + " " + pat["procedure"])
+                embedding = await self.embedder.embed_one(pat["pattern"] + " " + pat["procedure"])
                 pm = ProceduralMemory(
                     pattern=pat["pattern"],
                     procedure=pat["procedure"],
@@ -160,7 +161,7 @@ class SystemsConsolidator:
 
             # Store as a high-level observation with low decay rate
             now = datetime.utcnow()
-            embedding = await self.llm.embed_one(model_text)
+            embedding = await self.embedder.embed_one(model_text)
             mental_model = Observation(
                 dimension=result.get("dimension", f"{entity}:mental_model"),
                 content=model_text,

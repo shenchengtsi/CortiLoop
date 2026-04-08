@@ -115,7 +115,7 @@ for r in results:
     print(f"[{r['type']}] {r['content']} (score: {r['score']:.3f})")
 ```
 
-Any object that implements the `MemoryLLM` protocol works:
+Your LLM only needs **chat completion** — just 2 methods:
 
 ```python
 from cortiloop import MemoryLLM
@@ -123,9 +123,12 @@ from cortiloop import MemoryLLM
 class MyAgentLLM:  # implements MemoryLLM
     async def complete(self, system: str, user: str, response_format: str = "json") -> str: ...
     async def complete_json(self, system: str, user: str) -> dict: ...
-    async def embed(self, texts: list[str]) -> list[list[float]]: ...
-    async def embed_one(self, text: str) -> list[float]: ...
-    async def rerank(self, query: str, documents: list[str], top_k: int = 10) -> list[tuple[int, float]]: ...
+```
+
+Embedding and reranking are **handled internally** by CortiLoop (built-in hash-based embedder + word-overlap reranker). If your agent has a dedicated embedder, you can optionally pass it:
+
+```python
+loop = CortiLoop(llm=agent.llm, embedder=agent.embedder)  # optional
 ```
 
 ### Standalone (with built-in LLM config)

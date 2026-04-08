@@ -10,7 +10,7 @@ Designed as a plugin for nanobot, openclaw, or any MCP-compatible agent framewor
 __version__ = "0.4.0"
 
 from cortiloop.engine import CortiLoop
-from cortiloop.llm.protocol import MemoryLLM
+from cortiloop.llm.protocol import Embedder, MemoryLLM, Reranker
 from cortiloop.models import MemoryUnit, Observation, ProceduralMemory, MemoryEdge
 from cortiloop.config import CortiLoopConfig
 
@@ -18,6 +18,8 @@ __all__ = [
     "CortiLoop",
     "CortiLoopConfig",
     "MemoryLLM",
+    "Embedder",
+    "Reranker",
     "MemoryUnit",
     "Observation",
     "ProceduralMemory",

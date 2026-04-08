@@ -24,7 +24,7 @@ from cortiloop.encoding.attention_gate import AttentionGate
 from cortiloop.encoding.encoder import Encoder
 from cortiloop.forgetting.decay import DecayManager
 from cortiloop.forgetting.pruner import Pruner
-from cortiloop.llm.protocol import MemoryLLM
+from cortiloop.llm.protocol import Embedder, MemoryLLM, Reranker
 from cortiloop.models import MemoryUnit, Observation
 from cortiloop.reconsolidation.updater import Reconsolidator
 from cortiloop.retrieval.multi_probe import MultiProbeRetriever
@@ -38,10 +38,13 @@ class CortiLoop:
     """
     Bioinspired Agent Memory Engine.
 
-    Usage with Agent's LLM (recommended):
+    Usage with Agent's LLM (recommended — only chat completion needed):
         loop = CortiLoop(llm=agent.llm)
         await loop.retain("User said something important")
         results = await loop.recall("What did the user say?")
+
+    Optionally provide a dedicated embedder:
+        loop = CortiLoop(llm=agent.llm, embedder=my_embedder)
 
     Usage standalone (requires LLM config):
         loop = CortiLoop(config=CortiLoopConfig(...))
@@ -51,33 +54,55 @@ class CortiLoop:
         self,
         config: CortiLoopConfig | None = None,
         llm: MemoryLLM | None = None,
+        embedder: Embedder | None = None,
+        reranker: Reranker | None = None,
     ):
         self.config = config or CortiLoopConfig()
 
-        # Infrastructure — use provided LLM or create one from config
+        # Chat LLM — use provided or create from config
         if llm is not None:
             self.llm: MemoryLLM = llm
         else:
             from cortiloop.llm.client import LLMClient
             self.llm = LLMClient(self.config.llm)
+
+        # Embedder — use provided, or detect from llm, or use built-in
+        if embedder is not None:
+            self.embedder: Embedder = embedder
+        elif isinstance(self.llm, Embedder):
+            # LLM also provides embedding (e.g. LLMClient, LocalLLMClient)
+            self.embedder = self.llm
+        else:
+            from cortiloop.llm.builtin_embedder import BuiltinEmbedder
+            self.embedder = BuiltinEmbedder(dim=self.config.llm.embedding_dim)
+
+        # Reranker — use provided, or detect from llm, or use built-in
+        if reranker is not None:
+            self.reranker: Reranker = reranker
+        elif isinstance(self.llm, Reranker):
+            self.reranker = self.llm
+        else:
+            from cortiloop.llm.builtin_embedder import BuiltinReranker
+            self.reranker = BuiltinReranker()
+
         self.store: BaseStore = self._create_store()
 
         # 7 Bioinspired Layers
         self.attention_gate = AttentionGate(self.config.attention_gate, self.llm)
-        self.encoder = Encoder(self.config, self.llm)
+        self.encoder = Encoder(self.config, self.llm, self.embedder)
         self.graph = AssociationGraph(self.store)
         self.retriever = MultiProbeRetriever(
-            self.config.retrieval, self.store, self.llm, self.graph,
+            self.config.retrieval, self.store, self.embedder, self.reranker, self.graph,
         )
         self.synaptic = SynapticConsolidator(
-            self.config.consolidation, self.store, self.llm,
+            self.config.consolidation, self.store, self.llm, self.embedder,
         )
         self.systems = SystemsConsolidator(
-            self.config.consolidation, self.store, self.llm,
+            self.config.consolidation, self.store, self.llm, self.embedder,
         )
         self.decay = DecayManager(self.config.decay, self.store)
         self.pruner = Pruner(self.config.forgetting, self.store)
-        self.reconsolidator = Reconsolidator(self.store, self.llm)
+        self.reconsolidator = Reconsolidator(self.store, self.llm, self.embedder)
 
         # Background worker
         self.worker = ConsolidationWorker(

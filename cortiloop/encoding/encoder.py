@@ -10,7 +10,7 @@ from __future__ import annotations
 from datetime import datetime
 
 from cortiloop.config import CortiLoopConfig
-from cortiloop.llm.protocol import MemoryLLM
+from cortiloop.llm.protocol import Embedder, MemoryLLM
 from cortiloop.models import EncodingContext, MemoryUnit, SourceType
 
 _EXTRACT_PROMPT = """You are a memory extraction system. Given a conversation message, extract structured facts.
@@ -38,9 +38,10 @@ Rules:
 class Encoder:
     """Extracts structured memory units from raw text input."""
 
-    def __init__(self, config: CortiLoopConfig, llm: MemoryLLM):
+    def __init__(self, config: CortiLoopConfig, llm: MemoryLLM, embedder: Embedder):
         self.config = config
         self.llm = llm
+        self.embedder = embedder
 
     async def encode(
         self,
@@ -67,7 +68,7 @@ class Encoder:
 
         # Batch embed all fact contents
         contents = [f["content"] for f in facts]
-        embeddings = await self.llm.embed(contents)
+        embeddings = await self.embedder.embed(contents)
 
         units = []
         now = datetime.utcnow()

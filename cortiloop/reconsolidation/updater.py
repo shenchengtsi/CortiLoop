@@ -16,7 +16,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any
 
-from cortiloop.llm.protocol import MemoryLLM
+from cortiloop.llm.protocol import Embedder, MemoryLLM
 from cortiloop.models import ConflictRecord, MemoryUnit, Observation, SourceType
 from cortiloop.storage.base_store import BaseStore
 
@@ -47,9 +47,10 @@ class Reconsolidator:
     Ensures immutability of raw memory_units while allowing Observation evolution.
     """
 
-    def __init__(self, store: BaseStore, llm: MemoryLLM):
+    def __init__(self, store: BaseStore, llm: MemoryLLM, embedder: Embedder):
         self.store = store
         self.llm = llm
+        self.embedder = embedder
 
     async def check_and_update(
         self,
@@ -124,7 +125,7 @@ EXISTING OBSERVATION [{existing_obs.dimension}]: {existing_obs.content}""",
             existing_obs.version += 1
             existing_obs.updated_at = now
             existing_obs.source_unit_ids.append(new_unit.id)
-            existing_obs.embedding = await self.llm.embed_one(new_unit.content)
+            existing_obs.embedding = await self.embedder.embed_one(new_unit.content)
 
             # Higher confidence for user corrections
             if new_unit.source_type == SourceType.USER_SAID:
@@ -149,7 +150,7 @@ EXISTING OBSERVATION [{existing_obs.dimension}]: {existing_obs.content}""",
             existing_obs.version += 1
             existing_obs.updated_at = now
             existing_obs.source_unit_ids.append(new_unit.id)
-            existing_obs.embedding = await self.llm.embed_one(merged_content)
+            existing_obs.embedding = await self.embedder.embed_one(merged_content)
             self.store.insert_observation(existing_obs)
 
         elif conflict.resolution == "coexist":
