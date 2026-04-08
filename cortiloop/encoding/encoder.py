@@ -13,26 +13,35 @@ from cortiloop.config import CortiLoopConfig
 from cortiloop.llm.protocol import Embedder, MemoryLLM
 from cortiloop.models import EncodingContext, MemoryUnit, SourceType
 
-_EXTRACT_PROMPT = """You are a memory extraction system. Given a conversation message, extract structured facts.
+_EXTRACT_PROMPT = """You are a memory extraction system. Extract the most important facts from the input.
 
 Return JSON:
 {
   "facts": [
     {
-      "content": "one atomic fact in a single sentence",
-      "entities": ["entity1", "entity2"],
-      "source_type": "user_said" or "llm_inferred"
+      "content": "a complete, self-contained factual statement",
+      "entities": ["Person Name", "Project Name", "Organization"],
+      "source_type": "user_said"
     }
   ],
-  "skip": true/false  // true if the message contains no memorable information (greetings, acknowledgements)
+  "skip": true/false
 }
 
 Rules:
-- Each fact must be a single, atomic statement
-- Entity names should be normalized (consistent casing, no abbreviations)
-- source_type is "user_said" for facts directly stated by the user, "llm_inferred" for inferences
-- Set skip=true for pure greetings, "ok", "thanks", acknowledgements with no factual content
-- Prefer extracting fewer, higher-quality facts over many low-quality ones"""
+1. QUALITY over quantity: extract at most 5 facts. Merge related details into one fact instead of splitting.
+   BAD:  "CortiLoop uses SQLite" + "CortiLoop uses Python" (two fragments)
+   GOOD: "CortiLoop is a Python-based memory engine using SQLite storage" (one complete fact)
+2. Each fact must be self-contained — understandable without reading the original text.
+   BAD:  "py/updater.py" or "核心特色：7层生物记忆" (fragments, not self-contained)
+   GOOD: "CortiLoop's core feature is a 7-layer bioinspired memory lifecycle"
+3. Entity rules:
+   - Only extract proper nouns: person names, project names, organizations, technologies
+   - Use FULL names: "Hindsight" not "Hindsigh", "Cross-encoder" not "Cross", "Mental Models" not "Mental M"
+   - Do NOT extract common words as entities: "我正", "项目托管", "Issue" are NOT entities
+   - Chinese proper nouns should stay in Chinese: "字节跳动", "火山引擎"
+4. source_type: "user_said" for explicit statements, "llm_inferred" for conclusions you derive
+5. skip=true for: greetings, "ok/thanks", commands, pure code snippets, section headers like "【标题】"
+6. For long documents or comparison tables: summarize key conclusions, don't extract every row"""
 
 
 class Encoder:

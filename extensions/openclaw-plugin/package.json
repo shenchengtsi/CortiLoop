@@ -1,0 +1,22 @@
+{
+  "name": "@cortiloop/openclaw-plugin",
+  "version": "0.4.1",
+  "description": "CortiLoop bioinspired memory plugin for OpenClaw — auto-recall/capture via HTTP API",
+  "type": "module",
+  "dependencies": {
+    "@sinclair/typebox": "0.34.49"
+  },
+  "openclaw": {
+    "extensions": [
+      "./index.ts"
+    ],
+    "install": {
+      "npmSpec": "@cortiloop/openclaw-plugin",
+      "defaultChoice": "npm",
+      "minHostVersion": ">=2026.4.1"
+    },
+    "release": {
+      "publishToNpm": true
+    }
+  }
+}

@@ -34,47 +34,9 @@ from mcp import types
 from mcp.server import Server
 from mcp.server.stdio import stdio_server
 
-from cortiloop.config import CortiLoopConfig
-from cortiloop.engine import CortiLoop
-from cortiloop.llm.local_client import LocalLLMClient
+from cortiloop.adapters.shared import get_engine as _get_engine
 
 logger = logging.getLogger("cortiloop.mcp")
-
-# Global engine instance (created on first use)
-_engine: CortiLoop | None = None
-
-
-def _get_engine() -> CortiLoop:
-    global _engine
-    if _engine is not None:
-        return _engine
-
-    config = CortiLoopConfig()
-
-    # Config from environment variables
-    db_path = os.environ.get("CORTILOOP_DB_PATH", "~/.nanobot/cortiloop.db")
-    config.db_path = os.path.expanduser(db_path)
-
-    if os.environ.get("CORTILOOP_NAMESPACE"):
-        config.namespace = os.environ["CORTILOOP_NAMESPACE"]
-
-    # LLM: use external provider if configured, otherwise offline local client
-    provider = os.environ.get("CORTILOOP_LLM_PROVIDER", "local")
-
-    if provider == "local":
-        llm = LocalLLMClient(embedding_dim=config.llm.embedding_dim)
-        _engine = CortiLoop(config, llm=llm)
-    else:
-        config.llm.provider = provider
-        if os.environ.get("CORTILOOP_LLM_MODEL"):
-            config.llm.model = os.environ["CORTILOOP_LLM_MODEL"]
-        if os.environ.get("CORTILOOP_API_KEY"):
-            config.llm.api_key = os.environ["CORTILOOP_API_KEY"]
-        if os.environ.get("CORTILOOP_BASE_URL"):
-            config.llm.base_url = os.environ["CORTILOOP_BASE_URL"]
-        _engine = CortiLoop(config)
-
-    return _engine
 
 
 # Create MCP server

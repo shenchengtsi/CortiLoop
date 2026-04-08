@@ -21,8 +21,14 @@ decide whether to CREATE a new observation or UPDATE an existing one.
 Rules:
 - Each observation tracks exactly ONE dimension (one person, one topic, one metric)
 - Never combine unrelated topics into a single observation
+- Observations must be HIGHER-LEVEL ABSTRACTIONS that synthesize multiple facts, NOT copies of individual facts
+  BAD observation: "The user's name is Samson." (just copied one fact)
+  GOOD observation: "Samson is an AI product manager building CortiLoop, a bioinspired agent memory engine using Python 3.11+ and MIT license." (synthesized from multiple facts)
+- When multiple facts relate to the same topic, merge them into ONE observation
 - When updating, integrate new information into the existing text without losing prior facts
 - Do NOT do math or counting — state what happened, not computed totals
+- Use FULL proper nouns as entities: "Hindsight" not "Hindsigh", "Cross-encoder" not "Cross"
+- If only 1 isolated fact is provided with no related existing observations, return empty actions — wait for more facts to consolidate
 
 Return JSON:
 {
@@ -30,8 +36,8 @@ Return JSON:
     {
       "type": "create" or "update",
       "observation_id": "existing ID if update, empty if create",
-      "dimension": "what this observation tracks (e.g. 'Alice:role', 'ProjectX:status')",
-      "content": "the complete observation text incorporating new information",
+      "dimension": "what this observation tracks (e.g. 'Samson:profile', 'CortiLoop:architecture')",
+      "content": "synthesized observation combining related facts",
       "source_unit_ids": ["ids of memory units this is based on"],
       "entities": ["entity1", "entity2"]
     }

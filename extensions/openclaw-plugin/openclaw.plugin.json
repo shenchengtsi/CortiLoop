@@ -1,0 +1,56 @@
+{
+  "id": "memory-cortiloop",
+  "kind": "memory",
+  "uiHints": {
+    "cortiloopUrl": {
+      "label": "CortiLoop API URL",
+      "placeholder": "http://127.0.0.1:8766",
+      "help": "URL of the CortiLoop HTTP API server"
+    },
+    "autoCapture": {
+      "label": "Auto-Capture",
+      "help": "Automatically store conversation content after each agent turn"
+    },
+    "autoRecall": {
+      "label": "Auto-Recall",
+      "help": "Automatically inject relevant memories before each agent turn"
+    },
+    "recallTopK": {
+      "label": "Recall Top-K",
+      "placeholder": "5",
+      "help": "Maximum number of memories to inject per recall",
+      "advanced": true
+    },
+    "captureMaxChars": {
+      "label": "Capture Max Chars",
+      "placeholder": "2000",
+      "help": "Maximum message length eligible for auto-capture",
+      "advanced": true
+    }
+  },
+  "configSchema": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "cortiloopUrl": {
+        "type": "string"
+      },
+      "autoCapture": {
+        "type": "boolean"
+      },
+      "autoRecall": {
+        "type": "boolean"
+      },
+      "recallTopK": {
+        "type": "number",
+        "minimum": 1,
+        "maximum": 20
+      },
+      "captureMaxChars": {
+        "type": "number",
+        "minimum": 100,
+        "maximum": 10000
+      }
+    }
+  }
+}
