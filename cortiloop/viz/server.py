@@ -160,6 +160,13 @@ class VizAPI:
         elif category in ("episodic", "semantic", "procedural"):
             return [unit_to_dict(u) for u in units if u.tier.value == category]
         elif category == "total_edges":
+            # Build ID→content lookup for resolving edge endpoints
+            id_map = {}
+            for u in units:
+                id_map[u.id] = u.content
+            for o in observations:
+                id_map[o.id] = o.content
+
             edges = []
             seen = set()
             for u in units:
@@ -168,7 +175,14 @@ class VizAPI:
                     if eid not in seen:
                         seen.add(eid)
                         edges.append({
-                            "source": edge.source_id, "target": edge.target_id,
+                            "source_id": edge.source_id,
+                            "target_id": edge.target_id,
+                            "source_content": id_map.get(edge.source_id, "")[:120],
+                            "target_content": id_map.get(edge.target_id, "")[:120],
+                            "source_entities": (next((u.entities for u in units if u.id == edge.source_id), []) or
+                                                next((o.entities for o in observations if o.id == edge.source_id), [])),
+                            "target_entities": (next((u.entities for u in units if u.id == edge.target_id), []) or
+                                                next((o.entities for o in observations if o.id == edge.target_id), [])),
                             "type": edge.edge_type.value, "weight": round(edge.weight, 3),
                             "co_activations": edge.co_activation_count,
                         })
@@ -416,12 +430,25 @@ async function openDrilldown(category, label) {
   }
 
   if (category === 'total_edges') {
-    body.innerHTML = items.map(i =>
-      '<div class="drilldown-item">' +
-      '<div class="content">' + i.type + ' edge (weight: ' + i.weight + ', co-activations: ' + i.co_activations + ')</div>' +
-      '<div class="meta"><span>Source: ' + i.source.substring(0,8) + '...</span><span>Target: ' + i.target.substring(0,8) + '...</span></div>' +
-      '</div>'
-    ).join('');
+    body.innerHTML = items.map(i => {
+      const sTags = (i.source_entities||[]).map(e => '<span class="entity-tag">' + e + '</span>').join('');
+      const tTags = (i.target_entities||[]).map(e => '<span class="entity-tag">' + e + '</span>').join('');
+      return '<div class="drilldown-item">' +
+        '<div class="meta" style="margin-bottom:8px"><span style="color:#f0883e;font-weight:600">' + i.type + '</span><span>weight: ' + i.weight + '</span><span>co-activations: ' + i.co_activations + '</span></div>' +
+        '<div style="display:flex;gap:12px;flex-wrap:wrap">' +
+          '<div style="flex:1;min-width:200px;padding:8px 10px;background:#1c2128;border-radius:6px;border-left:3px solid #58a6ff">' +
+            '<div style="font-size:11px;color:#58a6ff;margin-bottom:4px">Source</div>' +
+            '<div class="content">' + (i.source_content || i.source_id.substring(0,8) + '...') + '</div>' +
+            (sTags ? '<div class="entities" style="margin-top:4px">' + sTags + '</div>' : '') +
+          '</div>' +
+          '<div style="flex:1;min-width:200px;padding:8px 10px;background:#1c2128;border-radius:6px;border-left:3px solid #d2a8ff">' +
+            '<div style="font-size:11px;color:#d2a8ff;margin-bottom:4px">Target</div>' +
+            '<div class="content">' + (i.target_content || i.target_id.substring(0,8) + '...') + '</div>' +
+            (tTags ? '<div class="entities" style="margin-top:4px">' + tTags + '</div>' : '') +
+          '</div>' +
+        '</div>' +
+      '</div>';
+    }).join('');
   } else {
     body.innerHTML = items.map(i => {
       const tags = (i.entities||[]).map(e => '<span class="entity-tag">' + e + '</span>').join('');

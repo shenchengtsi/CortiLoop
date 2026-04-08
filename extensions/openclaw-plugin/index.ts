@@ -288,10 +288,11 @@ export default definePluginEntry({
             }
           }
 
-          const toCapture = texts.filter((t) => {
+          // Strip injected memory context from text (prependContext merges into user message)
+          const cleaned = texts.map((t) => t.replace(/<relevant-memories>[\s\S]*?<\/relevant-memories>\s*/g, "").trim()).filter(Boolean);
+
+          const toCapture = cleaned.filter((t) => {
             if (t.length < 10 || t.length > cfg.captureMaxChars) return false;
-            // Skip injected memory context
-            if (t.includes("<relevant-memories>")) return false;
             // Skip prompt injection
             if (INJECTION_PATTERNS.some((p) => p.test(t))) return false;
             // Skip system-injected context (timestamps, heartbeat, workspace paths, system instructions)
