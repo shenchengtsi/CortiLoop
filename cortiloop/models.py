@@ -57,12 +57,12 @@ class MemoryUnit:
     encoding_context: EncodingContext = field(default_factory=EncodingContext)
     entities: list[str] = field(default_factory=list)
     embedding: list[float] = field(default_factory=list)
-    created_at: datetime = field(default_factory=datetime.utcnow)
+    created_at: datetime = field(default_factory=datetime.now)
 
     # Strength & decay (Ebbinghaus)
     base_strength: float = 1.0
     decay_rate: float = 0.1  # episodic decays faster
-    last_accessed: datetime = field(default_factory=datetime.utcnow)
+    last_accessed: datetime = field(default_factory=datetime.now)
     access_count: int = 0
 
     state: MemoryState = MemoryState.ACTIVE
@@ -83,13 +83,13 @@ class Observation:
     source_unit_ids: list[str] = field(default_factory=list)
     entities: list[str] = field(default_factory=list)
     embedding: list[float] = field(default_factory=list)
-    created_at: datetime = field(default_factory=datetime.utcnow)
-    updated_at: datetime = field(default_factory=datetime.utcnow)
+    created_at: datetime = field(default_factory=datetime.now)
+    updated_at: datetime = field(default_factory=datetime.now)
 
     # Strength & decay (semantic decays slower)
     base_strength: float = 1.0
     decay_rate: float = 0.03
-    last_accessed: datetime = field(default_factory=datetime.utcnow)
+    last_accessed: datetime = field(default_factory=datetime.now)
     access_count: int = 0
 
     state: MemoryState = MemoryState.ACTIVE
@@ -109,12 +109,12 @@ class ProceduralMemory:
     acquisition_count: int = 1
     confidence: float = 0.3  # increases with repetition
     embedding: list[float] = field(default_factory=list)
-    created_at: datetime = field(default_factory=datetime.utcnow)
+    created_at: datetime = field(default_factory=datetime.now)
 
     # Procedural memories decay extremely slowly
     base_strength: float = 1.0
     decay_rate: float = 0.005
-    last_accessed: datetime = field(default_factory=datetime.utcnow)
+    last_accessed: datetime = field(default_factory=datetime.now)
     access_count: int = 0
 
     state: MemoryState = MemoryState.ACTIVE
@@ -130,8 +130,8 @@ class MemoryEdge:
     edge_type: EdgeType = EdgeType.CO_OCCURRENCE
     weight: float = 1.0
     co_activation_count: int = 1
-    last_co_activated: datetime = field(default_factory=datetime.utcnow)
-    created_at: datetime = field(default_factory=datetime.utcnow)
+    last_co_activated: datetime = field(default_factory=datetime.now)
+    created_at: datetime = field(default_factory=datetime.now)
 
 
 @dataclass
@@ -141,7 +141,7 @@ class WorkingMemorySlot:
     memory_type: str = ""  # "unit", "observation", "procedural"
     content: str = ""
     relevance_score: float = 0.0
-    loaded_at: datetime = field(default_factory=datetime.utcnow)
+    loaded_at: datetime = field(default_factory=datetime.now)
 
 
 @dataclass
@@ -154,4 +154,4 @@ class ConflictRecord:
     old_value: str = ""
     new_value: str = ""
     resolution: str = ""  # "superseded", "coexist", "pending"
-    created_at: datetime = field(default_factory=datetime.utcnow)
+    created_at: datetime = field(default_factory=datetime.now)

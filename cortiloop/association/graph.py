@@ -49,7 +49,7 @@ class AssociationGraph:
     def _strengthen_edge(self, source: str, target: str, edge_type: EdgeType):
         """Apply Hebbian strengthening to an edge."""
         existing = self.store.get_edge(source, target, edge_type)
-        now = datetime.utcnow()
+        now = datetime.now()
 
         if existing:
             # Time-based decay since last co-activation

@@ -44,3 +44,10 @@ run_benchmark_*.py
 run_volcano_*.py
 quick_benchmark.py
 test_single_ie.py
+
+# Temp scripts
+store_with_text_llm.py
+
+# SQLite WAL/SHM
+*.db-shm
+*.db-wal

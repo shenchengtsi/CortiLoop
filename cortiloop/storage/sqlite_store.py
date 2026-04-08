@@ -285,7 +285,7 @@ class SQLiteStore(BaseStore):
         return [self._row_to_unit(r) for r in rows]
 
     def update_unit_access(self, unit_id: str):
-        now = datetime.utcnow()
+        now = datetime.now()
         self.conn.execute(
             f"UPDATE {self._t('memory_units')} SET last_accessed=?, access_count=access_count+1 WHERE id=?",
             (now, unit_id),
@@ -366,7 +366,7 @@ class SQLiteStore(BaseStore):
         return [self._row_to_observation(r) for r in rows]
 
     def update_observation_access(self, obs_id: str):
-        now = datetime.utcnow()
+        now = datetime.now()
         self.conn.execute(
             f"UPDATE {self._t('observations')} SET last_accessed=?, access_count=access_count+1 WHERE id=?",
             (now, obs_id),

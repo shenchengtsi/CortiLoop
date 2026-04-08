@@ -71,7 +71,7 @@ class Encoder:
         embeddings = await self.embedder.embed(contents)
 
         units = []
-        now = datetime.utcnow()
+        now = datetime.now()
         for i, fact in enumerate(facts):
             entities = [e.strip() for e in fact.get("entities", []) if e.strip()]
             source = SourceType.USER_SAID

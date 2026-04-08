@@ -100,7 +100,7 @@ EXISTING OBSERVATION [{existing_obs.dimension}]: {existing_obs.content}""",
             old_value=existing_obs.content,
             new_value=new_unit.content,
             resolution=result.get("resolution", "coexist"),
-            created_at=datetime.utcnow(),
+            created_at=datetime.now(),
         )
 
     async def _apply_resolution(
@@ -110,7 +110,7 @@ EXISTING OBSERVATION [{existing_obs.dimension}]: {existing_obs.content}""",
         existing_obs: Observation,
     ):
         """Apply the conflict resolution."""
-        now = datetime.utcnow()
+        now = datetime.now()
 
         if conflict.resolution == "supersede":
             # User correction: new info replaces old

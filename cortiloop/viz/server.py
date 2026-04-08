@@ -132,6 +132,54 @@ class VizAPI:
             })
         return timeline
 
+    def get_drilldown(self, category: str) -> list[dict[str, Any]]:
+        """Get memory list for a specific stat category."""
+        units = self.store.get_active_units(limit=10000)
+        observations = self.store.get_active_observations(limit=10000)
+
+        def unit_to_dict(u):
+            return {
+                "id": u.id, "content": u.content, "type": "unit",
+                "tier": u.tier.value, "strength": round(u.base_strength, 3),
+                "access_count": u.access_count, "entities": u.entities,
+                "created": u.created_at.isoformat() if u.created_at else "",
+            }
+
+        def obs_to_dict(o):
+            return {
+                "id": o.id, "content": o.content, "type": "observation",
+                "dimension": o.dimension, "strength": round(o.base_strength, 3),
+                "access_count": o.access_count, "entities": o.entities,
+                "created": o.created_at.isoformat() if o.created_at else "",
+            }
+
+        if category == "active_units":
+            return [unit_to_dict(u) for u in units]
+        elif category == "observations":
+            return [obs_to_dict(o) for o in observations]
+        elif category in ("episodic", "semantic", "procedural"):
+            return [unit_to_dict(u) for u in units if u.tier.value == category]
+        elif category == "total_edges":
+            edges = []
+            seen = set()
+            for u in units:
+                for edge in self.store.get_edges_from(u.id):
+                    eid = f"{edge.source_id}-{edge.target_id}"
+                    if eid not in seen:
+                        seen.add(eid)
+                        edges.append({
+                            "source": edge.source_id, "target": edge.target_id,
+                            "type": edge.edge_type.value, "weight": round(edge.weight, 3),
+                            "co_activations": edge.co_activation_count,
+                        })
+            return edges
+        elif category == "avg_access_count":
+            return sorted([unit_to_dict(u) for u in units], key=lambda x: -x["access_count"])
+        elif category == "avg_strength":
+            return sorted([unit_to_dict(u) for u in units], key=lambda x: -x["strength"])
+        else:
+            return []
+
     def get_decay_curves(self) -> dict[str, list[dict]]:
         """Get sample decay curves for visualization."""
         days = list(range(0, 91))
@@ -171,9 +219,27 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; b
 #graph-panel { position: relative; }
 #graph-panel svg { width: 100%; height: 100%; }
 .stats-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 16px; padding: 24px; }
-.stat-card { background: #161b22; border: 1px solid #30363d; border-radius: 8px; padding: 16px; }
+.stat-card { background: #161b22; border: 1px solid #30363d; border-radius: 8px; padding: 16px; cursor: pointer; transition: border-color 0.2s, transform 0.1s; }
+.stat-card:hover { border-color: #58a6ff; transform: translateY(-2px); }
+.stat-card:active { transform: translateY(0); }
 .stat-card .value { font-size: 28px; font-weight: 700; color: #58a6ff; }
 .stat-card .label { font-size: 12px; color: #8b949e; margin-top: 4px; }
+.stat-card .hint { font-size: 10px; color: #484f58; margin-top: 6px; }
+.drilldown-overlay { display: none; position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.6); z-index: 200; }
+.drilldown-overlay.active { display: flex; justify-content: center; align-items: center; }
+.drilldown-panel { background: #0d1117; border: 1px solid #30363d; border-radius: 12px; width: 80%; max-width: 900px; max-height: 80vh; display: flex; flex-direction: column; }
+.drilldown-header { padding: 16px 20px; border-bottom: 1px solid #30363d; display: flex; justify-content: space-between; align-items: center; }
+.drilldown-header h2 { font-size: 16px; font-weight: 600; }
+.drilldown-close { background: none; border: 1px solid #30363d; color: #8b949e; border-radius: 6px; padding: 4px 12px; cursor: pointer; font-size: 13px; }
+.drilldown-close:hover { border-color: #f78166; color: #f78166; }
+.drilldown-body { overflow-y: auto; padding: 16px 20px; flex: 1; }
+.drilldown-item { padding: 12px 16px; background: #161b22; border: 1px solid #30363d; border-radius: 8px; margin-bottom: 8px; }
+.drilldown-item .content { font-size: 14px; line-height: 1.5; margin-bottom: 6px; }
+.drilldown-item .meta { font-size: 11px; color: #8b949e; display: flex; gap: 12px; flex-wrap: wrap; }
+.drilldown-item .meta span { display: inline-flex; align-items: center; gap: 3px; }
+.drilldown-item .entities { margin-top: 6px; }
+.drilldown-item .entity-tag { display: inline-block; background: #1c2128; border: 1px solid #30363d; border-radius: 4px; padding: 1px 6px; font-size: 11px; color: #d2a8ff; margin-right: 4px; }
+.drilldown-count { font-size: 13px; color: #8b949e; }
 .timeline-list { padding: 24px; max-width: 800px; }
 .timeline-item { padding: 12px 16px; border-left: 3px solid #30363d; margin-left: 16px; margin-bottom: 8px; background: #161b22; border-radius: 0 8px 8px 0; }
 .timeline-item.episodic { border-left-color: #f78166; }
@@ -208,6 +274,18 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; b
 <div id="timeline-panel" class="panel"></div>
 <div id="decay-panel" class="panel decay-panel"></div>
 <div class="tooltip" id="tooltip" style="display:none"></div>
+<div class="drilldown-overlay" id="drilldown-overlay">
+  <div class="drilldown-panel">
+    <div class="drilldown-header">
+      <h2 id="drilldown-title">Details</h2>
+      <div style="display:flex;align-items:center;gap:12px">
+        <span class="drilldown-count" id="drilldown-count"></span>
+        <button class="drilldown-close" onclick="closeDrilldown()">Close</button>
+      </div>
+    </div>
+    <div class="drilldown-body" id="drilldown-body"></div>
+  </div>
+</div>
 
 <script>
 // Tab switching
@@ -281,6 +359,17 @@ async function loadGraph() {
 }
 
 // ── Statistics ──
+const CARD_CATEGORIES = {
+  'Active Units': 'active_units',
+  'Observations': 'observations',
+  'Graph Edges': 'total_edges',
+  'Avg Accesses': 'avg_access_count',
+  'Avg Strength': 'avg_strength',
+  'Episodic': 'episodic',
+  'Semantic': 'semantic',
+  'Procedural': 'procedural',
+};
+
 async function loadStats() {
   const s = await fetch('/api/stats').then(r => r.json());
   const panel = document.getElementById('stats-panel');
@@ -294,10 +383,69 @@ async function loadStats() {
     card(s.tiers?.semantic || 0, 'Semantic') +
     card(s.tiers?.procedural || 0, 'Procedural') +
     '</div>';
+  panel.querySelectorAll('.stat-card').forEach(el => {
+    el.addEventListener('click', () => openDrilldown(el.dataset.category, el.dataset.label));
+  });
 }
 function card(v, l) {
-  return '<div class="stat-card"><div class="value">' + v + '</div><div class="label">' + l + '</div></div>';
+  const cat = CARD_CATEGORIES[l] || '';
+  return '<div class="stat-card" data-category="' + cat + '" data-label="' + l + '">' +
+    '<div class="value">' + v + '</div>' +
+    '<div class="label">' + l + '</div>' +
+    '<div class="hint">click to view details</div></div>';
 }
+
+// ── Drilldown ──
+async function openDrilldown(category, label) {
+  const overlay = document.getElementById('drilldown-overlay');
+  const title = document.getElementById('drilldown-title');
+  const count = document.getElementById('drilldown-count');
+  const body = document.getElementById('drilldown-body');
+
+  title.textContent = label;
+  body.innerHTML = '<div style="color:#8b949e;padding:20px">Loading...</div>';
+  count.textContent = '';
+  overlay.classList.add('active');
+
+  const items = await fetch('/api/drilldown/' + category).then(r => r.json());
+  count.textContent = items.length + ' items';
+
+  if (items.length === 0) {
+    body.innerHTML = '<div style="color:#8b949e;padding:20px">No data</div>';
+    return;
+  }
+
+  if (category === 'total_edges') {
+    body.innerHTML = items.map(i =>
+      '<div class="drilldown-item">' +
+      '<div class="content">' + i.type + ' edge (weight: ' + i.weight + ', co-activations: ' + i.co_activations + ')</div>' +
+      '<div class="meta"><span>Source: ' + i.source.substring(0,8) + '...</span><span>Target: ' + i.target.substring(0,8) + '...</span></div>' +
+      '</div>'
+    ).join('');
+  } else {
+    body.innerHTML = items.map(i => {
+      const tags = (i.entities||[]).map(e => '<span class="entity-tag">' + e + '</span>').join('');
+      return '<div class="drilldown-item">' +
+        '<div class="content">' + (i.content||'') + '</div>' +
+        '<div class="meta">' +
+          (i.tier ? '<span>Tier: ' + i.tier + '</span>' : '') +
+          (i.dimension ? '<span>Dim: ' + i.dimension + '</span>' : '') +
+          '<span>Strength: ' + (i.strength||0) + '</span>' +
+          '<span>Accesses: ' + (i.access_count||0) + '</span>' +
+          '<span>' + (i.created||'').substring(0,19) + '</span>' +
+        '</div>' +
+        (tags ? '<div class="entities">' + tags + '</div>' : '') +
+        '</div>';
+    }).join('');
+  }
+}
+
+function closeDrilldown() {
+  document.getElementById('drilldown-overlay').classList.remove('active');
+}
+document.getElementById('drilldown-overlay').addEventListener('click', function(e) {
+  if (e.target === this) closeDrilldown();
+});
 
 // ── Timeline ──
 async function loadTimeline() {
@@ -375,6 +523,9 @@ class VizHandler(BaseHTTPRequestHandler):
             self._json_response(self.api.get_timeline())
         elif path == "/api/decay":
             self._json_response(self.api.get_decay_curves())
+        elif path.startswith("/api/drilldown/"):
+            category = path.split("/api/drilldown/", 1)[1]
+            self._json_response(self.api.get_drilldown(category))
         else:
             self._respond(404, "text/plain", "Not found")
 

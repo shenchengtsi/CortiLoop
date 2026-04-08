@@ -204,7 +204,7 @@ class MultiProbeRetriever:
     @staticmethod
     def _extract_time_range(query: str) -> tuple[datetime, datetime] | None:
         """Simple time range extraction from query text."""
-        now = datetime.utcnow()
+        now = datetime.now()
         lower = query.lower()
 
         patterns = {

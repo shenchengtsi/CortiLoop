@@ -96,7 +96,7 @@ EXISTING OBSERVATIONS:
             user=user_msg,
         )
 
-        now = datetime.utcnow()
+        now = datetime.now()
         for action in result.get("actions", []):
             if action["type"] == "create":
                 embedding = await self.embedder.embed_one(action["content"])

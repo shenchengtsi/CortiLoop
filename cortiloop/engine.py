@@ -34,6 +34,46 @@ from cortiloop.workers.consolidation_worker import ConsolidationWorker
 logger = logging.getLogger("cortiloop")
 
 
+class _FallbackEmbedder:
+    """Tries primary embedder first; on failure, lazily creates and uses fallback.
+
+    Solves the problem where LLMClient implements the Embedder protocol but the
+    actual API provider doesn't support embedding (e.g. doubao coding endpoint).
+    """
+
+    def __init__(self, primary: Embedder, fallback_factory):
+        self._primary = primary
+        self._fallback_factory = fallback_factory
+        self._fallback: Embedder | None = None
+        self._use_fallback = False
+
+    def _get_fallback(self) -> Embedder:
+        if self._fallback is None:
+            self._fallback = self._fallback_factory()
+            logger.info("Switched to fallback embedder: %s", type(self._fallback).__name__)
+        return self._fallback
+
+    async def embed(self, texts: list[str]) -> list[list[float]]:
+        if self._use_fallback:
+            return await self._get_fallback().embed(texts)
+        try:
+            return await self._primary.embed(texts)
+        except Exception as e:
+            logger.warning("LLM embedding failed (%s), switching to fallback", e)
+            self._use_fallback = True
+            return await self._get_fallback().embed(texts)
+
+    async def embed_one(self, text: str) -> list[float]:
+        if self._use_fallback:
+            return await self._get_fallback().embed_one(text)
+        try:
+            return await self._primary.embed_one(text)
+        except Exception as e:
+            logger.warning("LLM embedding failed (%s), switching to fallback", e)
+            self._use_fallback = True
+            return await self._get_fallback().embed_one(text)
+
+
 class CortiLoop:
     """
     Bioinspired Agent Memory Engine.
@@ -70,8 +110,9 @@ class CortiLoop:
         if embedder is not None:
             self.embedder: Embedder = embedder
         elif isinstance(self.llm, Embedder):
-            # LLM also provides embedding (e.g. LLMClient, LocalLLMClient)
-            self.embedder = self.llm
+            # LLM implements Embedder protocol — wrap with fallback in case provider
+            # doesn't actually support embedding API (e.g. doubao coding endpoint)
+            self.embedder = _FallbackEmbedder(self.llm, self._create_default_embedder)  # type: ignore
         else:
             self.embedder = self._create_default_embedder()
 
@@ -111,9 +152,11 @@ class CortiLoop:
     def _create_default_embedder(self) -> Embedder:
         """Auto-select best available embedder: sentence-transformers > hash fallback."""
         try:
+            import sentence_transformers  # noqa: F401 — availability check
             from cortiloop.llm.local_embedder import LocalEmbedder
+            logger.info("Using local sentence-transformers embedder")
             return LocalEmbedder()
-        except Exception:
+        except ImportError:
             logger.info("sentence-transformers not available, using hash-based embedding")
             from cortiloop.llm.builtin_embedder import BuiltinEmbedder
             return BuiltinEmbedder(dim=self.config.llm.embedding_dim)
@@ -121,9 +164,11 @@ class CortiLoop:
     def _create_default_reranker(self) -> Reranker:
         """Auto-select best available reranker: cross-encoder > word-overlap fallback."""
         try:
+            import sentence_transformers  # noqa: F401 — availability check
             from cortiloop.llm.local_embedder import LocalReranker
+            logger.info("Using local sentence-transformers reranker")
             return LocalReranker()
-        except Exception:
+        except ImportError:
             logger.info("sentence-transformers not available, using word-overlap reranking")
             from cortiloop.llm.builtin_embedder import BuiltinReranker
             return BuiltinReranker()
@@ -162,24 +207,36 @@ class CortiLoop:
         """
         # Step 1: Attention gate
         entity_count = self.store.count_units()
-        importance = await self.attention_gate.score(
-            text, entity_count, task_context,
-        )
+        try:
+            importance = await self.attention_gate.score(
+                text, entity_count, task_context,
+            )
+        except Exception as e:
+            logger.warning("Attention gate failed, using default importance: %s", e)
+            importance = 0.5
 
         if not self.attention_gate.passes(importance):
             logger.debug("Attention gate filtered: importance=%.2f < threshold", importance)
             return {"stored": 0, "importance": importance, "skipped": True}
 
         # Step 2: Encoding
-        units = await self.encoder.encode(
-            text, importance, session_id, task_context,
-        )
+        try:
+            units = await self.encoder.encode(
+                text, importance, session_id, task_context,
+            )
+        except Exception as e:
+            logger.warning("Encoding failed: %s", e)
+            return {"stored": 0, "importance": importance, "skipped": True, "error": str(e)}
         if not units:
             return {"stored": 0, "importance": importance, "skipped": True}
 
         # Step 3: Storage
-        for unit in units:
-            self.store.insert_unit(unit)
+        try:
+            for unit in units:
+                self.store.insert_unit(unit)
+        except Exception as e:
+            logger.warning("Storage failed: %s", e)
+            return {"stored": 0, "importance": importance, "skipped": True, "error": str(e)}
 
         # Step 4: Association (Hebbian linking)
         self.graph.link_co_occurring(units)
@@ -227,7 +284,11 @@ class CortiLoop:
 
         Returns: list of {"id", "type", "content", "score", "entities"}
         """
-        return await self.retriever.recall(query, top_k)
+        try:
+            return await self.retriever.recall(query, top_k)
+        except Exception as e:
+            logger.warning("Recall failed: %s", e)
+            return []
 
     async def reflect(self) -> dict[str, Any]:
         """

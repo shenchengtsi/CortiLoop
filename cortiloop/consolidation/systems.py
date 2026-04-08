@@ -93,7 +93,7 @@ class SystemsConsolidator:
             user=units_text,
         )
 
-        now = datetime.utcnow()
+        now = datetime.now()
         existing_procs = self.store.get_active_procedurals()
 
         for pat in result.get("patterns", []):
@@ -160,7 +160,7 @@ class SystemsConsolidator:
                 continue
 
             # Store as a high-level observation with low decay rate
-            now = datetime.utcnow()
+            now = datetime.now()
             embedding = await self.embedder.embed_one(model_text)
             mental_model = Observation(
                 dimension=result.get("dimension", f"{entity}:mental_model"),

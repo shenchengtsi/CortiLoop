@@ -115,19 +115,28 @@ class LLMClient:
 
         else:
             # openai or ollama (both use OpenAI-compatible API)
+            messages = [
+                {"role": "system", "content": system},
+                {"role": "user", "content": user},
+            ]
+            # For JSON mode: append instruction to system prompt instead of
+            # using response_format, which some providers don't support
+            if response_format == "json":
+                messages[0]["content"] += "\n\nYou MUST respond with valid JSON only. No markdown, no explanation, just JSON."
+
             kwargs: dict[str, Any] = {
                 "model": self.config.model,
-                "messages": [
-                    {"role": "system", "content": system},
-                    {"role": "user", "content": user},
-                ],
+                "messages": messages,
                 "temperature": 0.1,
             }
-            if response_format == "json" and self.config.provider != "ollama":
+            # Only use response_format for actual OpenAI API (not compatible endpoints)
+            is_real_openai = (
+                self.config.provider == "openai"
+                and (not self.config.base_url or "api.openai.com" in self.config.base_url)
+            )
+            if response_format == "json" and is_real_openai:
                 kwargs["response_format"] = {"type": "json_object"}
-            elif response_format == "json" and self.config.provider == "ollama":
-                # Ollama supports JSON mode via format parameter
-                kwargs["response_format"] = {"type": "json_object"}
+
             resp = client.chat.completions.create(**kwargs)
             return resp.choices[0].message.content or ""
 

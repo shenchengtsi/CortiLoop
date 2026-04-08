@@ -38,7 +38,7 @@ class DecayManager:
         strength = base_strength * e^(-decay_rate * elapsed_days) * spaced_boost
         where spaced_boost = 1 + access_boost * log(1 + access_count)
         """
-        now = now or datetime.utcnow()
+        now = now or datetime.now()
         elapsed_seconds = (now - last_accessed).total_seconds()
         elapsed_days = max(elapsed_seconds / 86400, 0)
 
@@ -61,7 +61,7 @@ class DecayManager:
         Sweep all active memories, update states based on current strength.
         Brain analogy: gradual synaptic weakening over time without reactivation.
         """
-        now = datetime.utcnow()
+        now = datetime.now()
 
         # Sweep memory units
         for uid, decay_rate, base_strength, last_accessed, access_count in self.store.get_all_active_units_for_decay():
