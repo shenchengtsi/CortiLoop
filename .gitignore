@@ -36,3 +36,11 @@ htmlcov/
 # Config with secrets
 config.yaml
 .env
+
+# Benchmark temp files
+benchmark_*.log
+benchmark_result*.json
+run_benchmark_*.py
+run_volcano_*.py
+quick_benchmark.py
+test_single_ie.py
