@@ -66,24 +66,22 @@ class CortiLoop:
             from cortiloop.llm.client import LLMClient
             self.llm = LLMClient(self.config.llm)
 
-        # Embedder — use provided, or detect from llm, or use built-in
+        # Embedder — use provided, or detect from llm, or auto-select best available
         if embedder is not None:
             self.embedder: Embedder = embedder
         elif isinstance(self.llm, Embedder):
             # LLM also provides embedding (e.g. LLMClient, LocalLLMClient)
             self.embedder = self.llm
         else:
-            from cortiloop.llm.builtin_embedder import BuiltinEmbedder
-            self.embedder = BuiltinEmbedder(dim=self.config.llm.embedding_dim)
+            self.embedder = self._create_default_embedder()
 
-        # Reranker — use provided, or detect from llm, or use built-in
+        # Reranker — use provided, or detect from llm, or auto-select best available
         if reranker is not None:
             self.reranker: Reranker = reranker
         elif isinstance(self.llm, Reranker):
             self.reranker = self.llm
         else:
-            from cortiloop.llm.builtin_embedder import BuiltinReranker
-            self.reranker = BuiltinReranker()
+            self.reranker = self._create_default_reranker()
 
         self.store: BaseStore = self._create_store()
 
@@ -109,6 +107,26 @@ class CortiLoop:
             self,
             interval_seconds=self.config.consolidation.systems_interval_seconds,
         )
+
+    def _create_default_embedder(self) -> Embedder:
+        """Auto-select best available embedder: sentence-transformers > hash fallback."""
+        try:
+            from cortiloop.llm.local_embedder import LocalEmbedder
+            return LocalEmbedder()
+        except Exception:
+            logger.info("sentence-transformers not available, using hash-based embedding")
+            from cortiloop.llm.builtin_embedder import BuiltinEmbedder
+            return BuiltinEmbedder(dim=self.config.llm.embedding_dim)
+
+    def _create_default_reranker(self) -> Reranker:
+        """Auto-select best available reranker: cross-encoder > word-overlap fallback."""
+        try:
+            from cortiloop.llm.local_embedder import LocalReranker
+            return LocalReranker()
+        except Exception:
+            logger.info("sentence-transformers not available, using word-overlap reranking")
+            from cortiloop.llm.builtin_embedder import BuiltinReranker
+            return BuiltinReranker()
 
     def _create_store(self) -> BaseStore:
         """Factory: create storage backend based on config."""
