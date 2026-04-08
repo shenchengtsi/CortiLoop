@@ -7,8 +7,9 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 [![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/downloads/)
 [![Tests](https://img.shields.io/badge/tests-48%20passed-brightgreen.svg)]()
+[![Benchmark](https://img.shields.io/badge/LongMemEval-92%25-blue.svg)]()
 
-> 可集成 [nanobot](https://github.com/HKUDS/nanobot)、[openclaw](https://github.com/openclaw/openclaw) 及任何 MCP 兼容的 Agent 框架。
+> AI Agent 记忆插件。可集成 [nanobot](https://github.com/HKUDS/nanobot)、[openclaw](https://github.com/openclaw/openclaw) 及任何 MCP 兼容的 Agent 框架。
 
 ---
 
@@ -53,10 +54,10 @@ Agent 输入 → [注意力门控] → [编码器] → [海马体存储]
 | 层 | 大脑类比 | 功能 |
 |----|---------|------|
 | **注意力门控** | 前额叶 + 多巴胺新奇信号 | 评估重要性；编码前过滤噪声 |
-| **编码器** | 海马体编码 + 实体绑定 | 通过 LLM 提取结构化事实、实体、嵌入向量 |
+| **编码器** | 海马体编码 + 实体绑定 | 提取结构化事实、实体、嵌入向量 |
 | **巩固** | 睡眠驱动的海马体→新皮层转移 | 突触巩固（即时）+ 系统巩固（深度/周期性）|
 | **关联** | 赫布学习 + 扩散激活 | 知识图谱：共现/时序/因果/语义边 |
-| **检索** | CA3 模式补全 + 多模态融合 | 4 路搜索 + RRF + 可选 cross-encoder 重排序 |
+| **检索** | CA3 模式补全 + 多模态融合 | 4 路搜索 + RRF + cross-encoder 重排序 |
 | **遗忘** | 艾宾浩斯曲线 + 小胶质细胞修剪 | 强度衰减、去重、容量管理 |
 | **再巩固** | 记忆去稳定 + 再稳定 | 冲突检测、安全更新、历史保留 |
 
@@ -83,28 +84,31 @@ Agent 输入 → [注意力门控] → [编码器] → [海马体存储]
 - `BaseStore` 抽象，支持自定义存储后端
 
 ### Agent 优先 (v0.4)
-- **`MemoryLLM` 协议** — 直接传入 Agent 已有的 LLM，无需额外配置
-- 作为 Agent 插件使用时零 LLM 配置
-- 内置 `LocalLLMClient` 支持离线/测试场景
-- **48 个测试** 全部通过，**92% 基准测试** 通过率
+- **`MemoryLLM` 协议** — Agent 只需提供 `complete()` + `complete_json()` 两个方法
+- **独立的 `Embedder` / `Reranker` 协议** — chat、embedding、reranking 是独立关注点
+- **本地 sentence-transformers** — `BAAI/bge-m3` 嵌入 + `BAAI/bge-reranker-v2-m3` 重排序，自动从 HuggingFace 下载，无需 API key
+- **4 级自动检测** — 用户传入 → LLM 内置 → sentence-transformers → hash 回退
+- **环境变量配置** — `CORTILOOP_EMBEDDING_MODEL` / `CORTILOOP_RERANKER_MODEL`
+- **48 个测试** 全部通过，**92% LongMemEval** 基准测试通过率
 
 ## 快速开始
 
 ```bash
 pip install cortiloop
 
-# 可选后端：
+# 可选依赖：
+pip install cortiloop[local]       # sentence-transformers（推荐，提升语义质量）
 pip install cortiloop[usearch]     # HNSW 向量索引
 pip install cortiloop[postgres]    # PostgreSQL + pgvector
 pip install cortiloop[all]         # 全部安装
 ```
 
-### Python API — 使用 Agent 已有的 LLM（推荐）
+### 使用 Agent 已有的 LLM（推荐）
 
 ```python
 from cortiloop import CortiLoop
 
-# Agent 已经有 LLM 客户端了 — 直接传进来
+# Agent 已经有 LLM 了 — 直接传进来
 loop = CortiLoop(llm=agent.llm)
 
 await loop.retain("Alice 是 ProjectX 的产品经理，使用 React + TypeScript")
@@ -125,10 +129,26 @@ class MyAgentLLM:  # 实现 MemoryLLM 协议
     async def complete_json(self, system: str, user: str) -> dict: ...
 ```
 
-Embedding 和 reranking 由 CortiLoop **内部处理**（内置 hash-based 嵌入 + 词重叠重排序）。如果 Agent 有独立的 embedding 服务，可以选择传入：
+**Embedding 和 reranking 自动处理。** CortiLoop 自动选择最佳可用后端：
+
+| 优先级 | Embedding | Reranking | 条件 |
+|--------|-----------|-----------|------|
+| 1 | 用户传入 `embedder=` | 用户传入 `reranker=` | 显式指定 |
+| 2 | LLM 内置 `embed()` | LLM 内置 `rerank()` | LLM 支持（如 LLMClient） |
+| 3 | `BAAI/bge-m3`（本地） | `BAAI/bge-reranker-v2-m3`（本地） | 已安装 `sentence-transformers` |
+| 4 | Hash n-gram 嵌入 | 词重叠率排序 | 零依赖回退 |
+
+通过环境变量覆盖模型：
+
+```bash
+CORTILOOP_EMBEDDING_MODEL=BAAI/bge-small-en-v1.5      # 更轻量的英语模型
+CORTILOOP_RERANKER_MODEL=cross-encoder/ms-marco-MiniLM-L-6-v2  # 更快的重排序
+```
+
+或显式传入：
 
 ```python
-loop = CortiLoop(llm=agent.llm, embedder=agent.embedder)  # 可选
+loop = CortiLoop(llm=agent.llm, embedder=my_embedder, reranker=my_reranker)
 ```
 
 ### 独立使用（内置 LLM 配置）
@@ -136,17 +156,10 @@ loop = CortiLoop(llm=agent.llm, embedder=agent.embedder)  # 可选
 ```python
 from cortiloop import CortiLoop, CortiLoopConfig
 
-# 如果没有现成的 LLM，CortiLoop 可以自行创建
+# 没有现成的 LLM？CortiLoop 可以从配置创建
 config = CortiLoopConfig(db_path="memory.db")
 config.llm.provider = "openai"  # 或 "ollama"、"anthropic"、"litellm"
 loop = CortiLoop(config=config)
-```
-
-### MCP 服务器
-
-```bash
-export OPENAI_API_KEY=sk-...
-cortiloop-mcp
 ```
 
 ### 使用 Ollama（完全本地，无需 API key）
@@ -155,9 +168,8 @@ cortiloop-mcp
 config = CortiLoopConfig(db_path="memory.db")
 config.llm.provider = "ollama"
 config.llm.model = "llama3.1"
-config.llm.embedding_model = "nomic-embed-text"
-config.llm.embedding_dim = 768
 loop = CortiLoop(config=config)
+# Embedding 由 sentence-transformers 或 hash 回退自动处理 — 无需配置
 ```
 
 ### 使用 PostgreSQL（生产级规模）
@@ -171,7 +183,14 @@ config = CortiLoopConfig(
     db_path="postgresql://user:pass@localhost:5432/cortiloop",
     storage_backend="postgres",  # 原生 pgvector HNSW
 )
-loop = CortiLoop(config)
+loop = CortiLoop(config=config)
+```
+
+### MCP 服务器
+
+```bash
+export OPENAI_API_KEY=sk-...
+cortiloop-mcp
 ```
 
 ### 可视化面板
@@ -186,7 +205,11 @@ cortiloop-viz --db cortiloop.db --port 8765
 ### 基准测试
 
 ```bash
-cortiloop-bench --provider openai --model gpt-4o-mini
+# 离线模式（无需 API key）
+python -m benchmarks.longmemeval --provider local
+
+# 使用 LLM
+python -m benchmarks.longmemeval --provider openai --model gpt-4o-mini
 ```
 
 评测 5 个维度：信息提取、时间推理、知识更新、关联检索、多会话推理。
@@ -249,9 +272,6 @@ context = await memory.on_before_response("写一个 React 组件")
 storage_backend: "sqlite"       # "sqlite" | "postgres"
 vector_backend: "auto"          # "auto" | "numpy" | "usearch"
 
-llm:
-  provider: "openai"            # "openai" | "anthropic" | "ollama" | "litellm"
-
 attention_gate:
   threshold: 0.2
   weights:
@@ -273,6 +293,13 @@ auth:
   api_keys: {}                  # key → namespace 映射
 ```
 
+Embedding / Reranking 模型选择（环境变量）：
+
+```bash
+CORTILOOP_EMBEDDING_MODEL=BAAI/bge-m3                    # 默认，多语言
+CORTILOOP_RERANKER_MODEL=BAAI/bge-reranker-v2-m3         # 默认，多语言
+```
+
 ## 设计原则
 
 1. **不是所有事都值得记住** — 注意力门控过滤噪声
@@ -283,25 +310,31 @@ auth:
 6. **部分线索，完整回忆** — 多探针搜索最大化召回
 7. **一起激活的神经元连在一起** — 赫布图谱增强
 8. **安全更新，绝不删除原始数据** — 再巩固保留完整历史
+9. **Agent 优先** — 作为插件使用时零配置；Agent 的 LLM 是唯一需求
 
 ## 项目结构
 
 ```
 cortiloop/
-├── encoding/          # 注意力门控 + LLM 编码器
+├── encoding/          # 注意力门控 + 编码器
 ├── consolidation/     # 突触巩固（即时）+ 系统巩固（深度）
 ├── retrieval/         # 多探针检索 + RRF + 重排序
 ├── association/       # 赫布知识图谱
 ├── forgetting/        # 艾宾浩斯衰减 + 修剪器
 ├── reconsolidation/   # 冲突检测 + 安全更新
 ├── storage/           # BaseStore ABC + SQLite + PostgreSQL
-├── llm/               # MemoryLLM 协议 + 内置适配器
+├── llm/
+│   ├── protocol.py        # MemoryLLM / Embedder / Reranker 协议定义
+│   ├── client.py          # 内置 LLM 客户端（OpenAI/Anthropic/Ollama/litellm）
+│   ├── local_client.py    # 离线规则客户端（用于测试/基准测试）
+│   ├── local_embedder.py  # sentence-transformers 嵌入 + cross-encoder 重排序
+│   └── builtin_embedder.py # Hash 嵌入回退（零依赖）
 ├── workers/           # 后台巩固 worker
 ├── adapters/          # MCP 服务器 + nanobot 插件 + openclaw 技能
 ├── viz/               # Web 可视化面板
 └── auth.py            # 多租户认证
 benchmarks/
-└── longmemeval.py     # LongMemEval 基准测试
+└── longmemeval.py     # LongMemEval 基准测试（5 维度，13 个用例）
 ```
 
 ## 开发
@@ -311,6 +344,7 @@ git clone https://github.com/shenchengtsi/CortiLoop.git
 cd CortiLoop
 pip install -e ".[dev]"
 pytest  # 48 个测试
+python -m benchmarks.longmemeval --provider local  # 92% 基准测试
 ```
 
 ## 许可证
