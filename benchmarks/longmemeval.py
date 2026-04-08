@@ -292,21 +292,12 @@ ALL_CASES = {
 
 def _create_engine(config: CortiLoopConfig, provider: str) -> CortiLoop:
     """Create engine, injecting LocalLLMClient when provider is 'local'."""
-    loop = CortiLoop(config)
-
     if provider == "local":
         from cortiloop.llm.local_client import LocalLLMClient
         local = LocalLLMClient(embedding_dim=config.llm.embedding_dim)
-        # Replace LLM client in engine and all sub-modules
-        loop.llm = local
-        loop.encoder.llm = local
-        loop.attention_gate.llm = local
-        loop.retriever.llm = local
-        loop.synaptic.llm = local
-        loop.systems.llm = local
-        loop.reconsolidator.llm = local
+        return CortiLoop(config, llm=local)
 
-    return loop
+    return CortiLoop(config)
 
 
 async def _run_case(

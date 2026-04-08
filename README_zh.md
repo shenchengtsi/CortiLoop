@@ -81,7 +81,12 @@ Agent 输入 → [注意力门控] → [编码器] → [海马体存储]
 - LongMemEval 基准测试（5 维度、13 个测试用例）
 - Web 可视化面板（D3.js 知识图谱 + 仪表盘）
 - `BaseStore` 抽象，支持自定义存储后端
-- **48 个测试** 全部通过
+
+### Agent 优先 (v0.4)
+- **`MemoryLLM` 协议** — 直接传入 Agent 已有的 LLM，无需额外配置
+- 作为 Agent 插件使用时零 LLM 配置
+- 内置 `LocalLLMClient` 支持离线/测试场景
+- **48 个测试** 全部通过，**92% 基准测试** 通过率
 
 ## 快速开始
 
@@ -94,29 +99,44 @@ pip install cortiloop[postgres]    # PostgreSQL + pgvector
 pip install cortiloop[all]         # 全部安装
 ```
 
-### Python API
+### Python API — 使用 Agent 已有的 LLM（推荐）
 
 ```python
-import asyncio
+from cortiloop import CortiLoop
+
+# Agent 已经有 LLM 客户端了 — 直接传进来
+loop = CortiLoop(llm=agent.llm)
+
+await loop.retain("Alice 是 ProjectX 的产品经理，使用 React + TypeScript")
+await loop.retain("好的")  # 被注意力门控过滤
+
+results = await loop.recall("Alice 的项目是什么？")
+for r in results:
+    print(f"[{r['type']}] {r['content']} (score: {r['score']:.3f})")
+```
+
+任何实现 `MemoryLLM` 协议的对象都可以：
+
+```python
+from cortiloop import MemoryLLM
+
+class MyAgentLLM:  # 实现 MemoryLLM 协议
+    async def complete(self, system: str, user: str, response_format: str = "json") -> str: ...
+    async def complete_json(self, system: str, user: str) -> dict: ...
+    async def embed(self, texts: list[str]) -> list[list[float]]: ...
+    async def embed_one(self, text: str) -> list[float]: ...
+    async def rerank(self, query: str, documents: list[str], top_k: int = 10) -> list[tuple[int, float]]: ...
+```
+
+### 独立使用（内置 LLM 配置）
+
+```python
 from cortiloop import CortiLoop, CortiLoopConfig
 
-async def main():
-    loop = CortiLoop(CortiLoopConfig(db_path="memory.db"))
-
-    # 存储（注意力门控自动过滤噪声）
-    await loop.retain("Alice 是 ProjectX 的产品经理，使用 React + TypeScript")
-    await loop.retain("好的")  # 被注意力门控过滤
-
-    # 检索（多探针融合）
-    results = await loop.recall("Alice 的项目是什么？")
-    for r in results:
-        print(f"[{r['type']}] {r['content']} (score: {r['score']:.3f})")
-
-    # 深度巩固
-    await loop.reflect()
-    loop.close()
-
-asyncio.run(main())
+# 如果没有现成的 LLM，CortiLoop 可以自行创建
+config = CortiLoopConfig(db_path="memory.db")
+config.llm.provider = "openai"  # 或 "ollama"、"anthropic"、"litellm"
+loop = CortiLoop(config=config)
 ```
 
 ### MCP 服务器
@@ -134,7 +154,7 @@ config.llm.provider = "ollama"
 config.llm.model = "llama3.1"
 config.llm.embedding_model = "nomic-embed-text"
 config.llm.embedding_dim = 768
-loop = CortiLoop(config)
+loop = CortiLoop(config=config)
 ```
 
 ### 使用 PostgreSQL（生产级规模）
@@ -272,7 +292,7 @@ cortiloop/
 ├── forgetting/        # 艾宾浩斯衰减 + 修剪器
 ├── reconsolidation/   # 冲突检测 + 安全更新
 ├── storage/           # BaseStore ABC + SQLite + PostgreSQL
-├── llm/               # LLM 抽象层（OpenAI/Anthropic/Ollama/litellm）
+├── llm/               # MemoryLLM 协议 + 内置适配器
 ├── workers/           # 后台巩固 worker
 ├── adapters/          # MCP 服务器 + nanobot 插件 + openclaw 技能
 ├── viz/               # Web 可视化面板

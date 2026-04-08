@@ -24,7 +24,7 @@ from cortiloop.encoding.attention_gate import AttentionGate
 from cortiloop.encoding.encoder import Encoder
 from cortiloop.forgetting.decay import DecayManager
 from cortiloop.forgetting.pruner import Pruner
-from cortiloop.llm.client import LLMClient
+from cortiloop.llm.protocol import MemoryLLM
 from cortiloop.models import MemoryUnit, Observation
 from cortiloop.reconsolidation.updater import Reconsolidator
 from cortiloop.retrieval.multi_probe import MultiProbeRetriever
@@ -38,18 +38,28 @@ class CortiLoop:
     """
     Bioinspired Agent Memory Engine.
 
-    Usage:
-        loop = CortiLoop(config)
+    Usage with Agent's LLM (recommended):
+        loop = CortiLoop(llm=agent.llm)
         await loop.retain("User said something important")
         results = await loop.recall("What did the user say?")
-        await loop.reflect()  # deep consolidation
+
+    Usage standalone (requires LLM config):
+        loop = CortiLoop(config=CortiLoopConfig(...))
     """
 
-    def __init__(self, config: CortiLoopConfig | None = None):
+    def __init__(
+        self,
+        config: CortiLoopConfig | None = None,
+        llm: MemoryLLM | None = None,
+    ):
         self.config = config or CortiLoopConfig()
 
-        # Infrastructure
-        self.llm = LLMClient(self.config.llm)
+        # Infrastructure — use provided LLM or create one from config
+        if llm is not None:
+            self.llm: MemoryLLM = llm
+        else:
+            from cortiloop.llm.client import LLMClient
+            self.llm = LLMClient(self.config.llm)
         self.store: BaseStore = self._create_store()
 
         # 7 Bioinspired Layers

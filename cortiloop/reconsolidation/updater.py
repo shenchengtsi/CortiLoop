@@ -16,7 +16,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any
 
-from cortiloop.llm.client import LLMClient
+from cortiloop.llm.protocol import MemoryLLM
 from cortiloop.models import ConflictRecord, MemoryUnit, Observation, SourceType
 from cortiloop.storage.base_store import BaseStore
 
@@ -47,7 +47,7 @@ class Reconsolidator:
     Ensures immutability of raw memory_units while allowing Observation evolution.
     """
 
-    def __init__(self, store: BaseStore, llm: LLMClient):
+    def __init__(self, store: BaseStore, llm: MemoryLLM):
         self.store = store
         self.llm = llm
 

@@ -14,7 +14,7 @@ from __future__ import annotations
 from datetime import datetime
 
 from cortiloop.config import ConsolidationConfig
-from cortiloop.llm.client import LLMClient
+from cortiloop.llm.protocol import MemoryLLM
 from cortiloop.models import Observation, ProceduralMemory
 from cortiloop.storage.base_store import BaseStore
 
@@ -60,7 +60,7 @@ class SystemsConsolidator:
     The "sleep cycle" of the memory system.
     """
 
-    def __init__(self, config: ConsolidationConfig, store: BaseStore, llm: LLMClient):
+    def __init__(self, config: ConsolidationConfig, store: BaseStore, llm: MemoryLLM):
         self.config = config
         self.store = store
         self.llm = llm

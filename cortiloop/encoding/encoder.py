@@ -10,7 +10,7 @@ from __future__ import annotations
 from datetime import datetime
 
 from cortiloop.config import CortiLoopConfig
-from cortiloop.llm.client import LLMClient
+from cortiloop.llm.protocol import MemoryLLM
 from cortiloop.models import EncodingContext, MemoryUnit, SourceType
 
 _EXTRACT_PROMPT = """You are a memory extraction system. Given a conversation message, extract structured facts.
@@ -38,7 +38,7 @@ Rules:
 class Encoder:
     """Extracts structured memory units from raw text input."""
 
-    def __init__(self, config: CortiLoopConfig, llm: LLMClient):
+    def __init__(self, config: CortiLoopConfig, llm: MemoryLLM):
         self.config = config
         self.llm = llm
 

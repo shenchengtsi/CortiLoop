@@ -81,7 +81,12 @@ Agent Input → [Attention Gate] → [Encoder] → [Hippocampal Store]
 - LongMemEval benchmark harness (5 dimensions, 13 test cases)
 - Web visualization panel (D3.js knowledge graph + dashboard)
 - `BaseStore` abstraction for custom storage backends
-- **48 tests** passing
+
+### Agent-First (v0.4)
+- **`MemoryLLM` Protocol** — pass in your Agent's existing LLM, no extra config
+- Zero LLM configuration when used as an Agent plugin
+- `LocalLLMClient` built-in for offline / testing use
+- **48 tests** passing, **92% benchmark** score
 
 ## Quick Start
 
@@ -94,29 +99,44 @@ pip install cortiloop[postgres]    # PostgreSQL + pgvector
 pip install cortiloop[all]         # Everything
 ```
 
-### Python API
+### Python API — Use Your Agent's LLM (Recommended)
 
 ```python
-import asyncio
+from cortiloop import CortiLoop
+
+# Your agent already has an LLM client — just pass it in
+loop = CortiLoop(llm=agent.llm)
+
+await loop.retain("Alice is the PM of ProjectX, using React + TypeScript")
+await loop.retain("ok")  # filtered out by attention gate
+
+results = await loop.recall("What's Alice's project?")
+for r in results:
+    print(f"[{r['type']}] {r['content']} (score: {r['score']:.3f})")
+```
+
+Any object that implements the `MemoryLLM` protocol works:
+
+```python
+from cortiloop import MemoryLLM
+
+class MyAgentLLM:  # implements MemoryLLM
+    async def complete(self, system: str, user: str, response_format: str = "json") -> str: ...
+    async def complete_json(self, system: str, user: str) -> dict: ...
+    async def embed(self, texts: list[str]) -> list[list[float]]: ...
+    async def embed_one(self, text: str) -> list[float]: ...
+    async def rerank(self, query: str, documents: list[str], top_k: int = 10) -> list[tuple[int, float]]: ...
+```
+
+### Standalone (with built-in LLM config)
+
+```python
 from cortiloop import CortiLoop, CortiLoopConfig
 
-async def main():
-    loop = CortiLoop(CortiLoopConfig(db_path="memory.db"))
-
-    # Store (attention gate filters noise automatically)
-    await loop.retain("Alice is the PM of ProjectX, using React + TypeScript")
-    await loop.retain("ok")  # filtered out by attention gate
-
-    # Retrieve (multi-probe fusion)
-    results = await loop.recall("What's Alice's project?")
-    for r in results:
-        print(f"[{r['type']}] {r['content']} (score: {r['score']:.3f})")
-
-    # Deep consolidation
-    await loop.reflect()
-    loop.close()
-
-asyncio.run(main())
+# If you don't have an existing LLM, CortiLoop can create one
+config = CortiLoopConfig(db_path="memory.db")
+config.llm.provider = "openai"  # or "ollama", "anthropic", "litellm"
+loop = CortiLoop(config=config)
 ```
 
 ### MCP Server
@@ -134,7 +154,7 @@ config.llm.provider = "ollama"
 config.llm.model = "llama3.1"
 config.llm.embedding_model = "nomic-embed-text"
 config.llm.embedding_dim = 768
-loop = CortiLoop(config)
+loop = CortiLoop(config=config)
 ```
 
 ### With PostgreSQL (production scale)
@@ -272,7 +292,7 @@ cortiloop/
 ├── forgetting/        # Ebbinghaus decay + pruner
 ├── reconsolidation/   # Conflict detection + safe update
 ├── storage/           # BaseStore ABC + SQLite + PostgreSQL
-├── llm/               # LLM abstraction (OpenAI/Anthropic/Ollama/litellm)
+├── llm/               # MemoryLLM protocol + built-in adapters
 ├── workers/           # Background consolidation worker
 ├── adapters/          # MCP server + nanobot plugin + openclaw skill
 ├── viz/               # Web visualization panel

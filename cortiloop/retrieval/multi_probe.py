@@ -17,7 +17,7 @@ from typing import Any
 
 from cortiloop.association.graph import AssociationGraph
 from cortiloop.config import RetrievalConfig
-from cortiloop.llm.client import LLMClient
+from cortiloop.llm.protocol import MemoryLLM
 from cortiloop.models import MemoryUnit, Observation, ProceduralMemory
 from cortiloop.storage.base_store import BaseStore
 
@@ -34,7 +34,7 @@ class MultiProbeRetriever:
         self,
         config: RetrievalConfig,
         store: BaseStore,
-        llm: LLMClient,
+        llm: MemoryLLM,
         graph: AssociationGraph,
     ):
         self.config = config

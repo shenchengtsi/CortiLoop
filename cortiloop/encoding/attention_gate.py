@@ -10,7 +10,7 @@ from __future__ import annotations
 import re
 
 from cortiloop.config import AttentionGateConfig
-from cortiloop.llm.client import LLMClient
+from cortiloop.llm.protocol import MemoryLLM
 
 
 # Signals that indicate correction / prediction error → strong encoding
@@ -37,7 +37,7 @@ class AttentionGate:
     Low scores for: greetings, repetition, phatic communication.
     """
 
-    def __init__(self, config: AttentionGateConfig, llm: LLMClient):
+    def __init__(self, config: AttentionGateConfig, llm: MemoryLLM):
         self.config = config
         self.llm = llm
 
