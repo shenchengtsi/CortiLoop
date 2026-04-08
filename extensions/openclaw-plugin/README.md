@@ -37,16 +37,26 @@ Add to your OpenClaw config:
 ```json
 {
   "plugins": {
-    "memory-cortiloop": {
-      "cortiloopUrl": "http://127.0.0.1:8766",
-      "autoRecall": true,
-      "autoCapture": true,
-      "recallTopK": 5,
-      "captureMaxChars": 2000
+    "slots": {
+      "memory": "memory-cortiloop"
+    },
+    "entries": {
+      "memory-cortiloop": {
+        "enabled": true,
+        "config": {
+          "cortiloopUrl": "http://127.0.0.1:8766",
+          "autoRecall": true,
+          "autoCapture": true,
+          "recallTopK": 5,
+          "captureMaxChars": 2000
+        }
+      }
     }
   }
 }
 ```
+
+**Important**: Custom config must be nested under `"config"`, and `"slots.memory"` must point to `"memory-cortiloop"` to override the default memory plugin.
 
 ## Features
 

@@ -2,109 +2,79 @@
  * CortiLoop OpenClaw Plugin
  *
  * Bioinspired long-term memory for AI conversations.
- * Delegates all heavy lifting (encoding, embedding, consolidation, graph, decay)
- * to the CortiLoop HTTP API server (Python).
- *
- * Provides:
- *   - Auto-recall: injects relevant memories before each agent turn
- *   - Auto-capture: stores conversation content after each agent turn
- *   - Manual tools: cortiloop_retain, cortiloop_recall, cortiloop_reflect, cortiloop_stats
- *   - CLI commands: cortiloop search/stats/reflect
+ * Thin HTTP client — all heavy lifting (encoding, embedding, consolidation,
+ * graph, decay) runs in the CortiLoop Python backend.
  *
  * Prerequisites:
- *   python -m cortiloop.adapters.http_server  (default port 8766)
+ *   python -m cortiloop.adapters.http_server
  */
 
-import { Type } from "@sinclair/typebox";
 import { definePluginEntry } from "openclaw/plugin-sdk/plugin-entry";
-import type { OpenClawPluginApi } from "openclaw/plugin-sdk/plugin-runtime";
-import { cortiloopConfigSchema } from "./config.js";
 
 // ============================================================================
-// HTTP Client for CortiLoop API
+// Config
 // ============================================================================
 
-class CortiLoopClient {
-  constructor(private readonly baseUrl: string) {}
+type CortiLoopConfig = {
+  cortiloopUrl: string;
+  autoCapture: boolean;
+  autoRecall: boolean;
+  recallTopK: number;
+  captureMaxChars: number;
+};
 
-  async retain(text: string, sessionId = "", taskContext = ""): Promise<Record<string, unknown>> {
-    return this.post("/retain", { text, session_id: sessionId, task_context: taskContext });
-  }
+const DEFAULT_URL = "http://127.0.0.1:8766";
 
-  async recall(query: string, topK = 5): Promise<unknown[]> {
-    const result = await this.post("/recall", { query, top_k: topK });
-    return Array.isArray(result) ? result : [];
-  }
-
-  async reflect(): Promise<Record<string, unknown>> {
-    return this.post("/reflect", {});
-  }
-
-  async stats(): Promise<Record<string, unknown>> {
-    return this.get("/stats");
-  }
-
-  async health(): Promise<boolean> {
-    try {
-      const result = await this.get("/health");
-      return (result as Record<string, unknown>).status === "ok";
-    } catch {
-      return false;
-    }
-  }
-
-  private async post(path: string, body: unknown): Promise<Record<string, unknown>> {
-    const response = await fetch(`${this.baseUrl}${path}`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(body),
-    });
-    if (!response.ok) {
-      throw new Error(`CortiLoop API ${path} failed: ${response.status} ${response.statusText}`);
-    }
-    return response.json() as Promise<Record<string, unknown>>;
-  }
-
-  private async get(path: string): Promise<unknown> {
-    const response = await fetch(`${this.baseUrl}${path}`);
-    if (!response.ok) {
-      throw new Error(`CortiLoop API ${path} failed: ${response.status} ${response.statusText}`);
-    }
-    return response.json();
-  }
+function parseConfig(value: unknown): CortiLoopConfig {
+  const cfg = (value && typeof value === "object" ? value : {}) as Record<string, unknown>;
+  return {
+    cortiloopUrl: typeof cfg.cortiloopUrl === "string" ? cfg.cortiloopUrl : DEFAULT_URL,
+    autoCapture: cfg.autoCapture !== false,
+    autoRecall: cfg.autoRecall !== false,
+    recallTopK: typeof cfg.recallTopK === "number" ? cfg.recallTopK : 5,
+    captureMaxChars: typeof cfg.captureMaxChars === "number" ? cfg.captureMaxChars : 2000,
+  };
 }
 
 // ============================================================================
-// Prompt injection guard
+// HTTP Client
 // ============================================================================
 
-const PROMPT_INJECTION_PATTERNS = [
+async function cortiloopPost(baseUrl: string, path: string, body: unknown): Promise<any> {
+  const res = await fetch(`${baseUrl}${path}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) throw new Error(`CortiLoop ${path}: ${res.status} ${res.statusText}`);
+  return res.json();
+}
+
+async function cortiloopGet(baseUrl: string, path: string): Promise<any> {
+  const res = await fetch(`${baseUrl}${path}`);
+  if (!res.ok) throw new Error(`CortiLoop ${path}: ${res.status} ${res.statusText}`);
+  return res.json();
+}
+
+// ============================================================================
+// Safety
+// ============================================================================
+
+const INJECTION_PATTERNS = [
   /ignore (all|any|previous|above|prior) instructions/i,
   /do not follow (the )?(system|developer)/i,
-  /system prompt/i,
   /<\s*(system|assistant|developer|tool|function|relevant-memories)\b/i,
-  /\b(run|execute|call|invoke)\b.{0,40}\b(tool|command)\b/i,
 ];
 
-function looksLikePromptInjection(text: string): boolean {
-  const normalized = text.replace(/\s+/g, " ").trim();
-  return PROMPT_INJECTION_PATTERNS.some((pattern) => pattern.test(normalized));
+function escapeForPrompt(text: string): string {
+  return text.replace(/[&<>"']/g, (c) =>
+    ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c] ?? c,
+  );
 }
-
-function escapeMemoryForPrompt(text: string): string {
-  return text.replace(/[&<>"']/g, (char) => {
-    const map: Record<string, string> = { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" };
-    return map[char] ?? char;
-  });
-}
-
-// ============================================================================
-// Format recalled memories for context injection
-// ============================================================================
 
 function formatMemoriesContext(memories: Array<{ content: string; score?: number }>): string {
   const lines = memories.map(
-    (m, i) => `${i + 1}. ${escapeMemoryForPrompt(m.content)}${m.score ? ` (${(m.score * 100).toFixed(0)}%)` : ""}`,
+    (m, i) => `${i + 1}. ${escapeForPrompt(m.content)}${m.score ? ` (${(m.score * 100).toFixed(0)}%)` : ""}`,
   );
   return [
     "<relevant-memories>",
@@ -115,7 +85,7 @@ function formatMemoriesContext(memories: Array<{ content: string; score?: number
 }
 
 // ============================================================================
-// Plugin Definition
+// Plugin
 // ============================================================================
 
 export default definePluginEntry({
@@ -123,48 +93,39 @@ export default definePluginEntry({
   name: "Memory (CortiLoop)",
   description: "Bioinspired long-term memory with auto-recall/capture via CortiLoop HTTP API",
   kind: "memory" as const,
-  configSchema: cortiloopConfigSchema,
+  configSchema: { parse: parseConfig },
 
-  register(api: OpenClawPluginApi) {
-    const cfg = cortiloopConfigSchema.parse(api.pluginConfig);
-    const client = new CortiLoopClient(cfg.cortiloopUrl);
+  register(api) {
+    const cfg = parseConfig(api.pluginConfig);
+    const baseUrl = cfg.cortiloopUrl;
 
-    api.logger.info(`memory-cortiloop: plugin registered (api: ${cfg.cortiloopUrl})`);
+    api.logger.info(`memory-cortiloop: registered (api: ${baseUrl})`);
 
-    // ========================================================================
+    // ====================================================================
     // Tools
-    // ========================================================================
+    // ====================================================================
 
     api.registerTool(
       {
         name: "cortiloop_recall",
         label: "CortiLoop Recall",
         description:
-          "Search long-term memories using multi-probe retrieval: semantic similarity, " +
-          "keyword matching, graph traversal, and temporal filtering. " +
-          "Use when you need context about user preferences, past decisions, or history.",
-        parameters: Type.Object({
-          query: Type.String({ description: "Search query" }),
-          top_k: Type.Optional(Type.Number({ description: "Max results (default: 5)" })),
-        }),
-        async execute(_toolCallId, params) {
+          "Search long-term memories using multi-probe retrieval (semantic + keyword + graph + temporal).",
+        parameters: {
+          type: "object",
+          properties: {
+            query: { type: "string", description: "Search query" },
+            top_k: { type: "number", description: "Max results (default 5)" },
+          },
+          required: ["query"],
+        },
+        async execute(_id, params) {
           const { query, top_k = 5 } = params as { query: string; top_k?: number };
-          const results = await client.recall(query, top_k);
-
-          if (results.length === 0) {
-            return {
-              content: [{ type: "text", text: "No relevant memories found." }],
-              details: { count: 0 },
-            };
+          const results = await cortiloopPost(baseUrl, "/recall", { query, top_k });
+          if (!Array.isArray(results) || results.length === 0) {
+            return { content: [{ type: "text", text: "No relevant memories found." }], details: { count: 0 } };
           }
-
-          const text = results
-            .map((r: any, i: number) => {
-              const score = r.score ? ` (${(r.score * 100).toFixed(0)}%)` : "";
-              return `${i + 1}. ${r.content}${score}`;
-            })
-            .join("\n");
-
+          const text = results.map((r: any, i: number) => `${i + 1}. ${r.content}`).join("\n");
           return {
             content: [{ type: "text", text: `Found ${results.length} memories:\n\n${text}` }],
             details: { count: results.length, memories: results },
@@ -178,23 +139,21 @@ export default definePluginEntry({
       {
         name: "cortiloop_retain",
         label: "CortiLoop Retain",
-        description:
-          "Store information into long-term memory. CortiLoop uses bioinspired attention gating, " +
-          "extracts structured facts, builds association graph, and triggers consolidation.",
-        parameters: Type.Object({
-          text: Type.String({ description: "Information to remember" }),
-          session_id: Type.Optional(Type.String({ description: "Session/conversation ID" })),
-          task_context: Type.Optional(Type.String({ description: "Current task description" })),
-        }),
-        async execute(_toolCallId, params) {
+        description: "Store information into long-term memory with bioinspired encoding pipeline.",
+        parameters: {
+          type: "object",
+          properties: {
+            text: { type: "string", description: "Information to remember" },
+            session_id: { type: "string", description: "Session ID" },
+            task_context: { type: "string", description: "Current task" },
+          },
+          required: ["text"],
+        },
+        async execute(_id, params) {
           const { text, session_id = "", task_context = "" } = params as {
-            text: string;
-            session_id?: string;
-            task_context?: string;
+            text: string; session_id?: string; task_context?: string;
           };
-
-          const result = await client.retain(text, session_id, task_context);
-
+          const result = await cortiloopPost(baseUrl, "/retain", { text, session_id, task_context });
           return {
             content: [{ type: "text", text: `Stored: ${JSON.stringify(result)}` }],
             details: result,
@@ -208,12 +167,10 @@ export default definePluginEntry({
       {
         name: "cortiloop_reflect",
         label: "CortiLoop Reflect",
-        description:
-          "Trigger deep consolidation: detect procedural patterns, " +
-          "generate mental models, run decay sweep, and prune duplicates.",
-        parameters: Type.Object({}),
+        description: "Trigger deep consolidation: detect patterns, generate mental models, run decay sweep.",
+        parameters: { type: "object", properties: {} },
         async execute() {
-          const result = await client.reflect();
+          const result = await cortiloopPost(baseUrl, "/reflect", {});
           return {
             content: [{ type: "text", text: `Reflection complete: ${JSON.stringify(result)}` }],
             details: result,
@@ -227,10 +184,10 @@ export default definePluginEntry({
       {
         name: "cortiloop_stats",
         label: "CortiLoop Stats",
-        description: "Get memory system statistics (unit count, observation count, graph edges, etc.)",
-        parameters: Type.Object({}),
+        description: "Get memory system statistics.",
+        parameters: { type: "object", properties: {} },
         async execute() {
-          const result = await client.stats();
+          const result = await cortiloopGet(baseUrl, "/stats");
           return {
             content: [{ type: "text", text: JSON.stringify(result, null, 2) }],
             details: result,
@@ -240,175 +197,148 @@ export default definePluginEntry({
       { name: "cortiloop_stats" },
     );
 
-    // ========================================================================
-    // CLI Commands
-    // ========================================================================
+    // ====================================================================
+    // CLI
+    // ====================================================================
 
     api.registerCli(
       ({ program }) => {
         const cmd = program.command("cortiloop").description("CortiLoop memory commands");
 
-        cmd
-          .command("search")
-          .description("Search memories")
-          .argument("<query>", "Search query")
-          .option("--top-k <n>", "Max results", "5")
+        cmd.command("health").description("Check server health").action(async () => {
+          try {
+            const r = await cortiloopGet(baseUrl, "/health");
+            console.log(r.status === "ok" ? "CortiLoop API is healthy" : "Unexpected response");
+          } catch (e) {
+            console.log(`CortiLoop API unreachable: ${e}`);
+            console.log(`  Start: python -m cortiloop.adapters.http_server`);
+          }
+        });
+
+        cmd.command("stats").description("Memory statistics").action(async () => {
+          console.log(JSON.stringify(await cortiloopGet(baseUrl, "/stats"), null, 2));
+        });
+
+        cmd.command("search").argument("<query>").option("--top-k <n>", "Max results", "5")
           .action(async (query: string, opts: { topK: string }) => {
-            const results = await client.recall(query, parseInt(opts.topK));
+            const results = await cortiloopPost(baseUrl, "/recall", { query, top_k: parseInt(opts.topK) });
             console.log(JSON.stringify(results, null, 2));
           });
 
-        cmd
-          .command("stats")
-          .description("Show memory statistics")
-          .action(async () => {
-            const stats = await client.stats();
-            console.log(JSON.stringify(stats, null, 2));
-          });
-
-        cmd
-          .command("reflect")
-          .description("Trigger deep consolidation")
-          .action(async () => {
-            const result = await client.reflect();
-            console.log(JSON.stringify(result, null, 2));
-          });
-
-        cmd
-          .command("health")
-          .description("Check CortiLoop server health")
-          .action(async () => {
-            const ok = await client.health();
-            console.log(ok ? "CortiLoop API is healthy" : "CortiLoop API is unreachable");
-            if (!ok) {
-              console.log(`  Make sure the server is running: python -m cortiloop.adapters.http_server`);
-              console.log(`  Expected URL: ${cfg.cortiloopUrl}`);
-            }
-          });
+        cmd.command("reflect").description("Trigger consolidation").action(async () => {
+          console.log(JSON.stringify(await cortiloopPost(baseUrl, "/reflect", {}), null, 2));
+        });
       },
       { commands: ["cortiloop"] },
     );
 
-    // ========================================================================
-    // Lifecycle Hooks — Auto-Recall
-    // ========================================================================
+    // ====================================================================
+    // Auto-Recall (before_agent_start)
+    // ====================================================================
 
     if (cfg.autoRecall) {
       api.on("before_agent_start", async (event) => {
-        if (!event.prompt || event.prompt.length < 5) {
-          return;
-        }
+        if (!event.prompt || event.prompt.length < 5) return;
 
         try {
-          const results = await client.recall(event.prompt, cfg.recallTopK);
+          const results = await cortiloopPost(baseUrl, "/recall", {
+            query: event.prompt,
+            top_k: cfg.recallTopK,
+          });
+          if (!Array.isArray(results) || results.length === 0) return;
 
-          if (results.length === 0) {
-            return;
-          }
-
-          api.logger.info?.(`memory-cortiloop: injecting ${results.length} memories into context`);
-
-          const memories = results.map((r: any) => ({
-            content: r.content || r.text || String(r),
-            score: r.score,
-          }));
-
+          api.logger.info?.(`memory-cortiloop: injecting ${results.length} memories`);
           return {
-            prependContext: formatMemoriesContext(memories),
+            prependContext: formatMemoriesContext(
+              results.map((r: any) => ({ content: r.content || String(r), score: r.score })),
+            ),
           };
         } catch (err) {
-          api.logger.warn(`memory-cortiloop: recall failed: ${String(err)}`);
+          api.logger.warn(`memory-cortiloop: recall failed: ${err}`);
         }
       });
     }
 
-    // ========================================================================
-    // Lifecycle Hooks — Auto-Capture
-    // ========================================================================
+    // ====================================================================
+    // Auto-Capture (agent_end)
+    // ====================================================================
 
     if (cfg.autoCapture) {
       api.on("agent_end", async (event) => {
-        if (!event.success || !event.messages || event.messages.length === 0) {
-          return;
-        }
+        if (!event.success || !event.messages?.length) return;
 
         try {
+          // Only capture the LAST user message (the actual prompt), not system-injected context
           const texts: string[] = [];
-
+          let lastUserMsg: Record<string, unknown> | null = null;
           for (const msg of event.messages) {
             if (!msg || typeof msg !== "object") continue;
-            const msgObj = msg as Record<string, unknown>;
-
-            // Capture user messages (avoid self-poisoning from model output)
-            if (msgObj.role !== "user") continue;
-
-            const content = msgObj.content;
-            if (typeof content === "string") {
-              texts.push(content);
-              continue;
-            }
-
-            if (Array.isArray(content)) {
-              for (const block of content) {
-                if (
-                  block &&
-                  typeof block === "object" &&
-                  "type" in block &&
-                  (block as Record<string, unknown>).type === "text" &&
-                  "text" in block &&
-                  typeof (block as Record<string, unknown>).text === "string"
-                ) {
-                  texts.push((block as Record<string, unknown>).text as string);
+            const m = msg as Record<string, unknown>;
+            if (m.role === "user") lastUserMsg = m;
+          }
+          if (lastUserMsg) {
+            const content = lastUserMsg.content;
+            if (typeof content === "string") { texts.push(content); }
+            else if (Array.isArray(content)) {
+              for (const b of content) {
+                if (b && typeof b === "object" && (b as any).type === "text" && typeof (b as any).text === "string") {
+                  texts.push((b as any).text);
                 }
               }
             }
           }
 
-          // Filter: skip injected context, too short/long, prompt injection
-          const toCapture = texts.filter((text) => {
-            if (text.length < 10 || text.length > cfg.captureMaxChars) return false;
-            if (text.includes("<relevant-memories>")) return false;
-            if (looksLikePromptInjection(text)) return false;
+          const toCapture = texts.filter((t) => {
+            if (t.length < 10 || t.length > cfg.captureMaxChars) return false;
+            // Skip injected memory context
+            if (t.includes("<relevant-memories>")) return false;
+            // Skip prompt injection
+            if (INJECTION_PATTERNS.some((p) => p.test(t))) return false;
+            // Skip system-injected context (timestamps, heartbeat, workspace paths, system instructions)
+            if (/^\s*\[?(current|local)\s*(time|date|datetime)/i.test(t)) return false;
+            if (/HEARTBEAT/i.test(t)) return false;
+            if (/^\s*(You are|Your role|System:|Instructions:)/i.test(t)) return false;
+            if (/\/Users\/\S+\.(md|json|yaml|txt)\b/.test(t)) return false;
+            if (/^(Mon|Tue|Wed|Thu|Fri|Sat|Sun)\w*,\s+\w+\s+\d+/i.test(t)) return false;
+            if (/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}/.test(t)) return false;
+            // Skip XML/HTML-like system blocks
+            if (/^<[a-z-]+(>|\s)[\s\S]*<\/[a-z-]+>$/is.test(t)) return false;
             return true;
           });
+          if (!toCapture.length) return;
 
-          if (toCapture.length === 0) return;
-
-          // CortiLoop handles dedup, importance scoring, and fact extraction internally
-          // Just send each capturable message as a retain call
           let stored = 0;
           for (const text of toCapture.slice(0, 5)) {
             try {
-              await client.retain(text);
+              await cortiloopPost(baseUrl, "/retain", { text });
               stored++;
-            } catch (err) {
-              api.logger.warn(`memory-cortiloop: retain failed for message: ${String(err)}`);
+            } catch (e) {
+              api.logger.warn(`memory-cortiloop: retain failed: ${e}`);
             }
           }
-
-          if (stored > 0) {
-            api.logger.info(`memory-cortiloop: auto-captured ${stored} messages`);
-          }
+          if (stored > 0) api.logger.info(`memory-cortiloop: auto-captured ${stored} messages`);
         } catch (err) {
-          api.logger.warn(`memory-cortiloop: capture failed: ${String(err)}`);
+          api.logger.warn(`memory-cortiloop: capture error: ${err}`);
         }
       });
     }
 
-    // ========================================================================
+    // ====================================================================
     // Service
-    // ========================================================================
+    // ====================================================================
 
     api.registerService({
       id: "memory-cortiloop",
       async start() {
-        const ok = await client.health();
-        if (ok) {
-          api.logger.info(`memory-cortiloop: connected to ${cfg.cortiloopUrl}`);
-        } else {
+        try {
+          const r = await cortiloopGet(baseUrl, "/health");
+          if (r.status === "ok") {
+            api.logger.info(`memory-cortiloop: connected to ${baseUrl}`);
+          }
+        } catch {
           api.logger.warn(
-            `memory-cortiloop: server unreachable at ${cfg.cortiloopUrl}. ` +
-            `Start it with: python -m cortiloop.adapters.http_server`,
+            `memory-cortiloop: server unreachable at ${baseUrl}. ` +
+            `Start: python -m cortiloop.adapters.http_server`,
           );
         }
       },
