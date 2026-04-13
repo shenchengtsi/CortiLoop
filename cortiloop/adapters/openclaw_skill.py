@@ -121,6 +121,11 @@ def print_setup_guide():
 ║      NanobotMemoryPlugin                                     ║
 ║  memory = NanobotMemoryPlugin()                              ║
 ║                                                              ║
+║  ── opencode integration ──                                  ║
+║                                                              ║
+║  cortiloop-opencode --mode full                              ║
+║  (or: cortiloop-opencode --mode mcp)                         ║
+║                                                              ║
 ║  ── openclaw integration ──                                  ║
 ║                                                              ║
 ║  Option A: MCP Registry                                      ║

@@ -1,0 +1,7 @@
+{
+  "name": "cortiloop-opencode-integration",
+  "private": true,
+  "dependencies": {
+    "@opencode-ai/plugin": "latest"
+  }
+}

@@ -9,7 +9,7 @@ description = "Bioinspired Agent Memory Engine — modeled after human brain mem
 readme = "README.md"
 requires-python = ">=3.11"
 license = "MIT"
-keywords = ["agent", "memory", "bioinspired", "mcp", "nanobot", "openclaw"]
+keywords = ["agent", "memory", "bioinspired", "mcp", "nanobot", "openclaw", "opencode"]
 classifiers = [
     "Development Status :: 4 - Beta",
     "Intended Audience :: Developers",
@@ -50,6 +50,7 @@ cortiloop-setup = "cortiloop.adapters.openclaw_skill:print_setup_guide"
 cortiloop-viz = "cortiloop.viz.server:main"
 cortiloop-bench = "benchmarks.longmemeval:main"
 cortiloop-bench-official = "benchmarks.longmemeval_official:main"
+cortiloop-opencode = "cortiloop.adapters.opencode_adapter:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["cortiloop"]
