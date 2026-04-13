@@ -15,6 +15,7 @@ class LLMConfig:
     api_key: str = ""  # read from env if empty
     base_url: str = ""  # custom endpoint (e.g. Ollama: http://localhost:11434/v1)
     rerank_model: str = ""  # optional dedicated reranker (e.g. "rerank-english-v3.0")
+    headers: dict[str, str] = field(default_factory=dict)  # custom HTTP headers (e.g. User-Agent override)
 
 
 @dataclass

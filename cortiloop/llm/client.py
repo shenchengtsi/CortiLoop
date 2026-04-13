@@ -61,6 +61,8 @@ class LLMClient:
             kwargs: dict[str, Any] = {"api_key": self._get_api_key(), "timeout": 120.0}
             if self.config.base_url:
                 kwargs["base_url"] = self.config.base_url
+            if self.config.headers:
+                kwargs["default_headers"] = self.config.headers
             self._chat_client = openai.OpenAI(**kwargs)
         return self._chat_client
 

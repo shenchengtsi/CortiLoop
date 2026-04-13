@@ -66,6 +66,9 @@ def get_engine() -> CortiLoop:
             config.llm.api_key = os.environ["CORTILOOP_API_KEY"]
         if os.environ.get("CORTILOOP_BASE_URL"):
             config.llm.base_url = os.environ["CORTILOOP_BASE_URL"]
+        if os.environ.get("CORTILOOP_LLM_HEADERS"):
+            import json as _json
+            config.llm.headers = _json.loads(os.environ["CORTILOOP_LLM_HEADERS"])
         _engine = CortiLoop(config, embedder=embedder, reranker=reranker)
 
     return _engine

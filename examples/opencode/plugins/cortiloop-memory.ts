@@ -59,6 +59,7 @@ async function bridge(
     CORTILOOP_EMBEDDING_MODEL: process.env.CORTILOOP_EMBEDDING_MODEL || "",
     CORTILOOP_EMBEDDING_DIM: process.env.CORTILOOP_EMBEDDING_DIM || "1024",
     CORTILOOP_ATTENTION_THRESHOLD: process.env.CORTILOOP_ATTENTION_THRESHOLD || "0.15",
+    CORTILOOP_LLM_HEADERS: process.env.CORTILOOP_LLM_HEADERS || "",
   }
 
   log(`bridge: ${command} (${payload.slice(0, 100)})`)

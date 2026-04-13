@@ -89,11 +89,7 @@ class VizAPI:
         """Get memory system statistics."""
         units = self.store.get_active_units(limit=10000)
         observations = self.store.get_active_observations(limit=10000)
-
-        # Tier distribution
-        tiers = {"episodic": 0, "semantic": 0, "procedural": 0}
-        for u in units:
-            tiers[u.tier.value] = tiers.get(u.tier.value, 0) + 1
+        procedurals = self.store.get_active_procedurals()
 
         # State distribution
         total_units = self.store.count_units()
@@ -111,7 +107,8 @@ class VizAPI:
             "total_units": total_units,
             "active_units": active_units,
             "observations": len(observations),
-            "tiers": tiers,
+            "procedurals": len(procedurals),
+            "archive_units": total_units - active_units,
             "avg_access_count": round(avg_access, 2),
             "avg_strength": round(avg_strength, 3),
             "total_edges": sum(1 for u in units for _ in self.store.get_edges_from(u.id)),
@@ -157,8 +154,26 @@ class VizAPI:
             return [unit_to_dict(u) for u in units]
         elif category == "observations":
             return [obs_to_dict(o) for o in observations]
-        elif category in ("episodic", "semantic", "procedural"):
-            return [unit_to_dict(u) for u in units if u.tier.value == category]
+        elif category == "procedurals":
+            procedurals = self.store.get_active_procedurals()
+            return [{
+                "id": p.id, "content": f"{p.pattern} → {p.procedure}", "type": "procedural",
+                "strength": round(p.base_strength, 3), "access_count": p.access_count,
+                "entities": p.entities, "confidence": round(p.confidence, 3),
+                "acquisitions": p.acquisition_count,
+                "created": p.created_at.isoformat() if p.created_at else "",
+            } for p in procedurals]
+        elif category == "archive_units":
+            ns = self.store.config.namespace
+            rows = self.store.conn.execute(
+                f"SELECT * FROM memory_units_{ns} WHERE state != 'active' ORDER BY created_at DESC"
+            ).fetchall()
+            return [{
+                "id": r[0], "content": r[1], "type": "unit",
+                "state": r[12], "strength": round(r[8], 3) if r[8] else 0,
+                "access_count": r[11] or 0, "entities": json.loads(r[5]) if r[5] else [],
+                "created": r[7].isoformat() if r[7] else "",
+            } for r in rows]
         elif category == "total_edges":
             # Build ID→content lookup for resolving edge endpoints
             id_map = {}
@@ -376,12 +391,10 @@ async function loadGraph() {
 const CARD_CATEGORIES = {
   'Active Units': 'active_units',
   'Observations': 'observations',
-  'Graph Edges': 'total_edges',
-  'Avg Accesses': 'avg_access_count',
+  'Procedurals': 'procedurals',
+  'Archive': 'archive_units',
   'Avg Strength': 'avg_strength',
-  'Episodic': 'episodic',
-  'Semantic': 'semantic',
-  'Procedural': 'procedural',
+  'Graph Edges': 'total_edges',
 };
 
 async function loadStats() {
@@ -390,12 +403,10 @@ async function loadStats() {
   panel.innerHTML = '<div class="stats-grid">' +
     card(s.active_units, 'Active Units') +
     card(s.observations, 'Observations') +
-    card(s.total_edges, 'Graph Edges') +
-    card(s.avg_access_count, 'Avg Accesses') +
+    card(s.procedurals || 0, 'Procedurals') +
+    card(s.archive_units || 0, 'Archive') +
     card(s.avg_strength, 'Avg Strength') +
-    card(s.tiers?.episodic || 0, 'Episodic') +
-    card(s.tiers?.semantic || 0, 'Semantic') +
-    card(s.tiers?.procedural || 0, 'Procedural') +
+    card(s.total_edges, 'Graph Edges') +
     '</div>';
   panel.querySelectorAll('.stat-card').forEach(el => {
     el.addEventListener('click', () => openDrilldown(el.dataset.category, el.dataset.label));
