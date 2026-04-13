@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from datetime import datetime
 from typing import Any
 
 from cortiloop.association.graph import AssociationGraph
@@ -193,6 +194,7 @@ class CortiLoop:
         session_id: str = "",
         task_context: str = "",
         source_type: str = "user_said",
+        session_timestamp: datetime | None = None,
     ) -> dict[str, Any]:
         """
         Encode input into memory. Full pipeline:
@@ -202,6 +204,10 @@ class CortiLoop:
         4. Association (build graph edges)
         5. Synaptic consolidation (async: units → observations)
         6. Reconsolidation (conflict detection + safe update)
+
+        Args:
+            session_timestamp: When the conversation originally happened
+                (as opposed to created_at which is always "now").
 
         Returns: {"stored": int, "importance": float, "skipped": bool}
         """
@@ -230,6 +236,11 @@ class CortiLoop:
         if not units:
             return {"stored": 0, "importance": importance, "skipped": True}
 
+        # Stamp session_timestamp on all units so recall can reason about recency
+        if session_timestamp:
+            for unit in units:
+                unit.session_timestamp = session_timestamp
+
         # Step 3: Storage
         try:
             for unit in units:
@@ -247,18 +258,21 @@ class CortiLoop:
         except Exception as e:
             logger.warning("Synaptic consolidation failed: %s", e)
 
-        # Step 6: Reconsolidation check
+        # Step 6: Reconsolidation check — scan all units for conflicts
         try:
-            if units[0].embedding:
-                related_obs = [
-                    obs for obs, sim
-                    in self.store.search_observations_by_vector(units[0].embedding, 5)
-                    if sim > 0.6
-                ]
-                if related_obs:
-                    conflicts = await self.reconsolidator.check_and_update(units, related_obs)
-                    if conflicts:
-                        logger.info("Reconsolidation: %d conflicts detected", len(conflicts))
+            seen_obs: set[str] = set()
+            related_obs: list = []
+            for unit in units:
+                if not unit.embedding:
+                    continue
+                for obs, sim in self.store.search_observations_by_vector(unit.embedding, 5):
+                    if obs.id not in seen_obs and sim > 0.6:
+                        seen_obs.add(obs.id)
+                        related_obs.append(obs)
+            if related_obs:
+                conflicts = await self.reconsolidator.check_and_update(units, related_obs)
+                if conflicts:
+                    logger.info("Reconsolidation: %d conflicts detected", len(conflicts))
         except Exception as e:
             logger.warning("Reconsolidation check failed: %s", e)
 

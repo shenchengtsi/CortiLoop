@@ -7,7 +7,7 @@ encoding, consolidation, storage, retrieval, association, forgetting, reconsolid
 Designed as a plugin for nanobot, openclaw, or any MCP-compatible agent framework.
 """
 
-__version__ = "0.4.6"
+__version__ = "0.4.7"
 
 from cortiloop.engine import CortiLoop
 from cortiloop.llm.protocol import Embedder, MemoryLLM, Reranker

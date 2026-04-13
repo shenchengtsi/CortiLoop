@@ -117,10 +117,13 @@ class MultiProbeRetriever:
 
         # Search memory units
         for unit, sim in self.store.search_units_by_vector(query_emb, limit):
-            results.append({
+            entry = {
                 "id": unit.id, "type": "unit", "content": unit.content,
                 "score": sim, "entities": unit.entities,
-            })
+            }
+            if unit.session_timestamp:
+                entry["session_timestamp"] = unit.session_timestamp.strftime("%Y-%m-%d")
+            results.append(entry)
 
         # Search observations
         for obs, sim in self.store.search_observations_by_vector(query_emb, limit):
@@ -150,10 +153,13 @@ class MultiProbeRetriever:
             for unit in self.store.search_units_by_keyword(kw, limit):
                 if unit.id not in seen:
                     seen.add(unit.id)
-                    results.append({
+                    entry = {
                         "id": unit.id, "type": "unit", "content": unit.content,
                         "score": 1.0, "entities": unit.entities,
-                    })
+                    }
+                    if unit.session_timestamp:
+                        entry["session_timestamp"] = unit.session_timestamp.strftime("%Y-%m-%d")
+                    results.append(entry)
 
         return results[:limit]
 
@@ -176,10 +182,13 @@ class MultiProbeRetriever:
                 continue  # skip seeds (already in results)
             unit = self.store.get_unit(node_id)
             if unit:
-                results.append({
+                entry = {
                     "id": unit.id, "type": "unit", "content": unit.content,
                     "score": activation, "entities": unit.entities,
-                })
+                }
+                if unit.session_timestamp:
+                    entry["session_timestamp"] = unit.session_timestamp.strftime("%Y-%m-%d")
+                results.append(entry)
             if len(results) >= limit:
                 break
 

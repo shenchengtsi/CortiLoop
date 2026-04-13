@@ -59,6 +59,9 @@ class MemoryUnit:
     embedding: list[float] = field(default_factory=list)
     created_at: datetime = field(default_factory=datetime.now)
 
+    # Original session timestamp (when the conversation actually happened)
+    session_timestamp: datetime | None = None
+
     # Strength & decay (Ebbinghaus)
     base_strength: float = 1.0
     decay_rate: float = 0.1  # episodic decays faster
