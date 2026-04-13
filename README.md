@@ -205,14 +205,33 @@ Features: force-directed knowledge graph, statistics dashboard, memory timeline,
 ### Benchmark
 
 ```bash
-# Offline (no API key needed)
+# Quick smoke test (13 hand-crafted cases, offline)
 python -m benchmarks.longmemeval --provider local
 
-# With LLM
-python -m benchmarks.longmemeval --provider openai --model gpt-4o-mini
+# Official LongMemEval (500 questions from ICLR 2025 paper)
+python -m benchmarks.download_longmemeval --variant s   # download dataset first
+python -m benchmarks.longmemeval_official --variant s --provider openai
+
+# Run specific question types
+python -m benchmarks.longmemeval_official --variant s --types knowledge-update temporal-reasoning
+
+# Run a subset for quick iteration
+python -m benchmarks.longmemeval_official --variant s --max-items 20
+
+# Save results as JSON
+python -m benchmarks.longmemeval_official --variant s --output results.json
 ```
 
-Evaluates 5 dimensions: Information Extraction, Temporal Reasoning, Knowledge Update, Associative Retrieval, Multi-Session Reasoning.
+**Quick benchmark** (13 cases): Information Extraction, Temporal Reasoning, Knowledge Update, Associative Retrieval, Multi-Session Reasoning.
+
+**Official LongMemEval** (500 questions, 3 variants):
+| Variant | Sessions/Question | Tokens | Use Case |
+|---------|-------------------|--------|----------|
+| oracle | Answer-relevant only | ~small | Debugging |
+| s | ~40 | ~115K | Recommended |
+| m | ~500 | ~1.5M | Stress test |
+
+6 question types: single-session-user, single-session-assistant, single-session-preference, temporal-reasoning, knowledge-update, multi-session.
 
 ## Integration
 
@@ -334,7 +353,10 @@ cortiloop/
 ├── viz/               # Web visualization panel
 └── auth.py            # Multi-tenant authentication
 benchmarks/
-└── longmemeval.py     # LongMemEval benchmark harness (5 dimensions, 13 cases)
+├── longmemeval.py             # Quick benchmark (5 dimensions, 13 cases)
+├── longmemeval_official.py    # Official LongMemEval (500 questions, ICLR 2025)
+├── download_longmemeval.py    # Dataset downloader (HuggingFace)
+└── data/                      # Downloaded datasets (gitignored)
 ```
 
 ## Development

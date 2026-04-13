@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "cortiloop"
-version = "0.3.0"
+version = "0.4.6"
 description = "Bioinspired Agent Memory Engine — modeled after human brain memory mechanisms"
 readme = "README.md"
 requires-python = ">=3.11"
@@ -49,6 +49,7 @@ cortiloop-mcp = "cortiloop.adapters.mcp_server:main"
 cortiloop-setup = "cortiloop.adapters.openclaw_skill:print_setup_guide"
 cortiloop-viz = "cortiloop.viz.server:main"
 cortiloop-bench = "benchmarks.longmemeval:main"
+cortiloop-bench-official = "benchmarks.longmemeval_official:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["cortiloop"]

@@ -27,8 +27,11 @@ def get_engine() -> CortiLoop:
 
     if provider == "local":
         from cortiloop.llm.local_client import LocalLLMClient
+        from cortiloop.llm.local_embedder import LocalEmbedder, LocalReranker
         llm = LocalLLMClient(embedding_dim=config.llm.embedding_dim)
-        _engine = CortiLoop(config, llm=llm)
+        embedder = LocalEmbedder()
+        reranker = LocalReranker()
+        _engine = CortiLoop(config, llm=llm, embedder=embedder, reranker=reranker)
     else:
         config.llm.provider = provider
         if os.environ.get("CORTILOOP_LLM_MODEL"):
