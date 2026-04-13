@@ -23,6 +23,10 @@ def get_engine() -> CortiLoop:
     if os.environ.get("CORTILOOP_NAMESPACE"):
         config.namespace = os.environ["CORTILOOP_NAMESPACE"]
 
+    # Attention gate threshold — lower = more permissive
+    if os.environ.get("CORTILOOP_ATTENTION_THRESHOLD"):
+        config.attention_gate.threshold = float(os.environ["CORTILOOP_ATTENTION_THRESHOLD"])
+
     # Embedding config — must be set before engine init (affects vector index dim)
     if os.environ.get("CORTILOOP_EMBEDDING_MODEL"):
         config.llm.embedding_model = os.environ["CORTILOOP_EMBEDDING_MODEL"]
