@@ -25,7 +25,9 @@ def get_engine() -> CortiLoop:
 
     # Attention gate threshold — lower = more permissive
     if os.environ.get("CORTILOOP_ATTENTION_THRESHOLD"):
-        config.attention_gate.threshold = float(os.environ["CORTILOOP_ATTENTION_THRESHOLD"])
+        config.attention_gate.threshold = float(
+            os.environ["CORTILOOP_ATTENTION_THRESHOLD"]
+        )
 
     # Embedding config — must be set before engine init (affects vector index dim)
     if os.environ.get("CORTILOOP_EMBEDDING_MODEL"):
@@ -42,17 +44,22 @@ def get_engine() -> CortiLoop:
     if embedding_model:
         try:
             from cortiloop.llm.local_embedder import LocalEmbedder, LocalReranker
+
             embedder = LocalEmbedder(model_name=embedding_model)
             reranker = LocalReranker()
+            # Sync vector index dim with actual embedder output dimension
+            config.llm.embedding_dim = embedder.dim
         except ImportError:
             pass
 
     if provider == "local":
         from cortiloop.llm.local_client import LocalLLMClient
+
         llm = LocalLLMClient(embedding_dim=config.llm.embedding_dim)
         if embedder is None:
             try:
                 from cortiloop.llm.local_embedder import LocalEmbedder, LocalReranker
+
                 embedder = LocalEmbedder()
                 reranker = LocalReranker()
             except ImportError:
@@ -68,6 +75,7 @@ def get_engine() -> CortiLoop:
             config.llm.base_url = os.environ["CORTILOOP_BASE_URL"]
         if os.environ.get("CORTILOOP_LLM_HEADERS"):
             import json as _json
+
             config.llm.headers = _json.loads(os.environ["CORTILOOP_LLM_HEADERS"])
         _engine = CortiLoop(config, embedder=embedder, reranker=reranker)
 

@@ -292,7 +292,8 @@ class SQLiteStore(BaseStore):
 
     def get_unit(self, unit_id: str) -> MemoryUnit | None:
         row = self.conn.execute(
-            f"SELECT {self._UNIT_COLS} FROM {self._t('memory_units')} WHERE id=?", (unit_id,)
+            f"SELECT {self._UNIT_COLS} FROM {self._t('memory_units')} WHERE id=?",
+            (unit_id,),
         ).fetchone()
         return self._row_to_unit(row) if row else None
 
@@ -414,7 +415,8 @@ class SQLiteStore(BaseStore):
 
     def get_observation(self, obs_id: str) -> Observation | None:
         row = self.conn.execute(
-            f"SELECT {self._OBS_COLS} FROM {self._t('observations')} WHERE id=?", (obs_id,)
+            f"SELECT {self._OBS_COLS} FROM {self._t('observations')} WHERE id=?",
+            (obs_id,),
         ).fetchone()
         return self._row_to_observation(row) if row else None
 
@@ -524,7 +526,8 @@ class SQLiteStore(BaseStore):
 
     def _get_procedural(self, proc_id: str) -> ProceduralMemory | None:
         row = self.conn.execute(
-            f"SELECT {self._PROC_COLS} FROM {self._t('procedural_memories')} WHERE id=?", (proc_id,)
+            f"SELECT {self._PROC_COLS} FROM {self._t('procedural_memories')} WHERE id=?",
+            (proc_id,),
         ).fetchone()
         return self._row_to_procedural(row) if row else None
 

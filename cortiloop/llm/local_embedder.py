@@ -45,6 +45,7 @@ class LocalEmbedder:
             return self._model
         try:
             from sentence_transformers import SentenceTransformer
+
             logger.info("Loading embedding model: %s", self._model_name)
             self._model = SentenceTransformer(self._model_name)
             return self._model
@@ -53,6 +54,11 @@ class LocalEmbedder:
                 "sentence-transformers is required for local embedding. "
                 "Install with: pip install sentence-transformers"
             )
+
+    @property
+    def dim(self) -> int:
+        model = self._load_model()
+        return model.get_sentence_embedding_dimension()
 
     async def embed(self, texts: list[str]) -> list[list[float]]:
         model = self._load_model()
@@ -83,6 +89,7 @@ class LocalReranker:
             return self._model
         try:
             from sentence_transformers import CrossEncoder
+
             logger.info("Loading reranker model: %s", self._model_name)
             self._model = CrossEncoder(self._model_name)
             return self._model

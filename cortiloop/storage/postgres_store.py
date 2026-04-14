@@ -161,12 +161,24 @@ class PostgresStore(BaseStore):
             """)
 
             # Indices
-            cur.execute(f"CREATE INDEX IF NOT EXISTS idx_mu_state_{ns} ON memory_units_{ns}(state)")
-            cur.execute(f"CREATE INDEX IF NOT EXISTS idx_mu_entities_{ns} ON memory_units_{ns} USING gin(entities)")
-            cur.execute(f"CREATE INDEX IF NOT EXISTS idx_obs_state_{ns} ON observations_{ns}(state)")
-            cur.execute(f"CREATE INDEX IF NOT EXISTS idx_obs_dim_{ns} ON observations_{ns}(dimension)")
-            cur.execute(f"CREATE INDEX IF NOT EXISTS idx_edges_src_{ns} ON edges_{ns}(source_id)")
-            cur.execute(f"CREATE INDEX IF NOT EXISTS idx_edges_tgt_{ns} ON edges_{ns}(target_id)")
+            cur.execute(
+                f"CREATE INDEX IF NOT EXISTS idx_mu_state_{ns} ON memory_units_{ns}(state)"
+            )
+            cur.execute(
+                f"CREATE INDEX IF NOT EXISTS idx_mu_entities_{ns} ON memory_units_{ns} USING gin(entities)"
+            )
+            cur.execute(
+                f"CREATE INDEX IF NOT EXISTS idx_obs_state_{ns} ON observations_{ns}(state)"
+            )
+            cur.execute(
+                f"CREATE INDEX IF NOT EXISTS idx_obs_dim_{ns} ON observations_{ns}(dimension)"
+            )
+            cur.execute(
+                f"CREATE INDEX IF NOT EXISTS idx_edges_src_{ns} ON edges_{ns}(source_id)"
+            )
+            cur.execute(
+                f"CREATE INDEX IF NOT EXISTS idx_edges_tgt_{ns} ON edges_{ns}(target_id)"
+            )
 
             # pgvector HNSW indices for fast ANN search
             cur.execute(f"""
@@ -186,8 +198,12 @@ class PostgresStore(BaseStore):
             """)
 
         # ── Schema migration: add session_timestamp to existing tables ──
-        self._migrate_add_column(f"memory_units_{ns}", "session_timestamp", "TIMESTAMPTZ")
-        self._migrate_add_column(f"observations_{ns}", "session_timestamp", "TIMESTAMPTZ")
+        self._migrate_add_column(
+            f"memory_units_{ns}", "session_timestamp", "TIMESTAMPTZ"
+        )
+        self._migrate_add_column(
+            f"observations_{ns}", "session_timestamp", "TIMESTAMPTZ"
+        )
 
     def _migrate_add_column(self, table: str, column: str, col_type: str):
         """Add a column to an existing table if it doesn't exist yet."""
@@ -229,7 +245,7 @@ class PostgresStore(BaseStore):
     def insert_unit(self, unit: MemoryUnit) -> None:
         with self.conn.cursor() as cur:
             cur.execute(
-                f"""INSERT INTO {self._t('memory_units')}
+                f"""INSERT INTO {self._t("memory_units")}
                     (id, content, source_type, importance_score, encoding_context,
                      entities, embedding, created_at, session_timestamp, base_strength,
                      decay_rate, last_accessed, access_count, state, tier)
@@ -238,18 +254,30 @@ class PostgresStore(BaseStore):
                         content=EXCLUDED.content, embedding=EXCLUDED.embedding,
                         state=EXCLUDED.state""",
                 (
-                    unit.id, unit.content, unit.source_type.value, unit.importance_score,
-                    json.dumps(unit.encoding_context.__dict__), json.dumps(unit.entities),
+                    unit.id,
+                    unit.content,
+                    unit.source_type.value,
+                    unit.importance_score,
+                    json.dumps(unit.encoding_context.__dict__),
+                    json.dumps(unit.entities),
                     unit.embedding if unit.embedding else None,
-                    unit.created_at, unit.session_timestamp, unit.base_strength,
-                    unit.decay_rate, unit.last_accessed, unit.access_count,
-                    unit.state.value, unit.tier.value,
+                    unit.created_at,
+                    unit.session_timestamp,
+                    unit.base_strength,
+                    unit.decay_rate,
+                    unit.last_accessed,
+                    unit.access_count,
+                    unit.state.value,
+                    unit.tier.value,
                 ),
             )
 
     def get_unit(self, unit_id: str) -> MemoryUnit | None:
         with self.conn.cursor() as cur:
-            cur.execute(f"SELECT {self._UNIT_COLS} FROM {self._t('memory_units')} WHERE id=%s", (unit_id,))
+            cur.execute(
+                f"SELECT {self._UNIT_COLS} FROM {self._t('memory_units')} WHERE id=%s",
+                (unit_id,),
+            )
             row = cur.fetchone()
             return self._row_to_unit(row) if row else None
 
@@ -264,11 +292,13 @@ class PostgresStore(BaseStore):
     def get_recent_units(self, limit: int = 50) -> list[MemoryUnit]:
         return self.get_active_units(limit)
 
-    def search_units_by_vector(self, query_emb: list[float], top_k: int = 20) -> list[tuple[MemoryUnit, float]]:
+    def search_units_by_vector(
+        self, query_emb: list[float], top_k: int = 20
+    ) -> list[tuple[MemoryUnit, float]]:
         with self.conn.cursor() as cur:
             cur.execute(
                 f"""SELECT {self._UNIT_COLS}, 1 - (embedding <=> %s::vector) as similarity
-                    FROM {self._t('memory_units')}
+                    FROM {self._t("memory_units")}
                     WHERE state='active' AND embedding IS NOT NULL
                     ORDER BY embedding <=> %s::vector
                     LIMIT %s""",
@@ -281,7 +311,9 @@ class PostgresStore(BaseStore):
                 results.append((unit, float(sim)))
             return results
 
-    def search_units_by_keyword(self, keyword: str, limit: int = 20) -> list[MemoryUnit]:
+    def search_units_by_keyword(
+        self, keyword: str, limit: int = 20
+    ) -> list[MemoryUnit]:
         with self.conn.cursor() as cur:
             cur.execute(
                 f"SELECT {self._UNIT_COLS} FROM {self._t('memory_units')} WHERE state='active' AND content ILIKE %s LIMIT %s",
@@ -320,16 +352,28 @@ class PostgresStore(BaseStore):
         ctx_raw = r[4]
         ctx_dict = json.loads(ctx_raw) if isinstance(ctx_raw, str) else (ctx_raw or {})
         entities_raw = r[5]
-        entities = json.loads(entities_raw) if isinstance(entities_raw, str) else (entities_raw or [])
+        entities = (
+            json.loads(entities_raw)
+            if isinstance(entities_raw, str)
+            else (entities_raw or [])
+        )
         embedding = list(r[6]) if r[6] is not None else []
         return MemoryUnit(
-            id=r[0], content=r[1], source_type=SourceType(r[2]),
-            importance_score=r[3], encoding_context=EncodingContext(**ctx_dict),
-            entities=entities, embedding=embedding,
-            created_at=r[7], session_timestamp=r[8],
-            base_strength=r[9], decay_rate=r[10],
-            last_accessed=r[11], access_count=r[12],
-            state=MemoryState(r[13]), tier=MemoryTier(r[14]),
+            id=r[0],
+            content=r[1],
+            source_type=SourceType(r[2]),
+            importance_score=r[3],
+            encoding_context=EncodingContext(**ctx_dict),
+            entities=entities,
+            embedding=embedding,
+            created_at=r[7],
+            session_timestamp=r[8],
+            base_strength=r[9],
+            decay_rate=r[10],
+            last_accessed=r[11],
+            access_count=r[12],
+            state=MemoryState(r[13]),
+            tier=MemoryTier(r[14]),
         )
 
     # ── Observation CRUD ──
@@ -337,7 +381,7 @@ class PostgresStore(BaseStore):
     def insert_observation(self, obs: Observation) -> None:
         with self.conn.cursor() as cur:
             cur.execute(
-                f"""INSERT INTO {self._t('observations')}
+                f"""INSERT INTO {self._t("observations")}
                     (id, dimension, content, confidence, version, source_unit_ids,
                      entities, embedding, created_at, updated_at, session_timestamp,
                      base_strength, decay_rate, last_accessed, access_count, state, history)
@@ -348,18 +392,32 @@ class PostgresStore(BaseStore):
                         updated_at=EXCLUDED.updated_at, session_timestamp=EXCLUDED.session_timestamp,
                         history=EXCLUDED.history, state=EXCLUDED.state""",
                 (
-                    obs.id, obs.dimension, obs.content, obs.confidence, obs.version,
-                    json.dumps(obs.source_unit_ids), json.dumps(obs.entities),
+                    obs.id,
+                    obs.dimension,
+                    obs.content,
+                    obs.confidence,
+                    obs.version,
+                    json.dumps(obs.source_unit_ids),
+                    json.dumps(obs.entities),
                     obs.embedding if obs.embedding else None,
-                    obs.created_at, obs.updated_at, obs.session_timestamp,
-                    obs.base_strength, obs.decay_rate, obs.last_accessed,
-                    obs.access_count, obs.state.value, json.dumps(obs.history),
+                    obs.created_at,
+                    obs.updated_at,
+                    obs.session_timestamp,
+                    obs.base_strength,
+                    obs.decay_rate,
+                    obs.last_accessed,
+                    obs.access_count,
+                    obs.state.value,
+                    json.dumps(obs.history),
                 ),
             )
 
     def get_observation(self, obs_id: str) -> Observation | None:
         with self.conn.cursor() as cur:
-            cur.execute(f"SELECT {self._OBS_COLS} FROM {self._t('observations')} WHERE id=%s", (obs_id,))
+            cur.execute(
+                f"SELECT {self._OBS_COLS} FROM {self._t('observations')} WHERE id=%s",
+                (obs_id,),
+            )
             row = cur.fetchone()
             return self._row_to_observation(row) if row else None
 
@@ -371,11 +429,13 @@ class PostgresStore(BaseStore):
             )
             return [self._row_to_observation(r) for r in cur.fetchall()]
 
-    def search_observations_by_vector(self, query_emb: list[float], top_k: int = 20) -> list[tuple[Observation, float]]:
+    def search_observations_by_vector(
+        self, query_emb: list[float], top_k: int = 20
+    ) -> list[tuple[Observation, float]]:
         with self.conn.cursor() as cur:
             cur.execute(
                 f"""SELECT {self._OBS_COLS}, 1 - (embedding <=> %s::vector) as similarity
-                    FROM {self._t('observations')}
+                    FROM {self._t("observations")}
                     WHERE state='active' AND embedding IS NOT NULL
                     ORDER BY embedding <=> %s::vector
                     LIMIT %s""",
@@ -414,11 +474,22 @@ class PostgresStore(BaseStore):
         embedding = list(r[7]) if r[7] is not None else []
         history = json.loads(r[16]) if isinstance(r[16], str) else (r[16] or [])
         return Observation(
-            id=r[0], dimension=r[1], content=r[2], confidence=r[3], version=r[4],
-            source_unit_ids=source_ids, entities=entities, embedding=embedding,
-            created_at=r[8], updated_at=r[9], session_timestamp=r[10],
-            base_strength=r[11], decay_rate=r[12], last_accessed=r[13],
-            access_count=r[14], state=MemoryState(r[15]),
+            id=r[0],
+            dimension=r[1],
+            content=r[2],
+            confidence=r[3],
+            version=r[4],
+            source_unit_ids=source_ids,
+            entities=entities,
+            embedding=embedding,
+            created_at=r[8],
+            updated_at=r[9],
+            session_timestamp=r[10],
+            base_strength=r[11],
+            decay_rate=r[12],
+            last_accessed=r[13],
+            access_count=r[14],
+            state=MemoryState(r[15]),
             history=history,
         )
 
@@ -427,7 +498,7 @@ class PostgresStore(BaseStore):
     def insert_procedural(self, pm: ProceduralMemory) -> None:
         with self.conn.cursor() as cur:
             cur.execute(
-                f"""INSERT INTO {self._t('procedural_memories')}
+                f"""INSERT INTO {self._t("procedural_memories")}
                     (id, pattern, procedure, entities, acquisition_count, confidence,
                      embedding, created_at, base_strength, decay_rate,
                      last_accessed, access_count, state)
@@ -437,11 +508,19 @@ class PostgresStore(BaseStore):
                         acquisition_count=EXCLUDED.acquisition_count,
                         embedding=EXCLUDED.embedding""",
                 (
-                    pm.id, pm.pattern, pm.procedure, json.dumps(pm.entities),
-                    pm.acquisition_count, pm.confidence,
+                    pm.id,
+                    pm.pattern,
+                    pm.procedure,
+                    json.dumps(pm.entities),
+                    pm.acquisition_count,
+                    pm.confidence,
                     pm.embedding if pm.embedding else None,
-                    pm.created_at, pm.base_strength, pm.decay_rate,
-                    pm.last_accessed, pm.access_count, pm.state.value,
+                    pm.created_at,
+                    pm.base_strength,
+                    pm.decay_rate,
+                    pm.last_accessed,
+                    pm.access_count,
+                    pm.state.value,
                 ),
             )
 
@@ -453,11 +532,13 @@ class PostgresStore(BaseStore):
             )
             return [self._row_to_procedural(r) for r in cur.fetchall()]
 
-    def search_procedurals_by_vector(self, query_emb: list[float], top_k: int = 5) -> list[tuple[ProceduralMemory, float]]:
+    def search_procedurals_by_vector(
+        self, query_emb: list[float], top_k: int = 5
+    ) -> list[tuple[ProceduralMemory, float]]:
         with self.conn.cursor() as cur:
             cur.execute(
                 f"""SELECT {self._PROC_COLS}, 1 - (embedding <=> %s::vector) as similarity
-                    FROM {self._t('procedural_memories')}
+                    FROM {self._t("procedural_memories")}
                     WHERE state='active' AND embedding IS NOT NULL
                     ORDER BY embedding <=> %s::vector
                     LIMIT %s""",
@@ -474,11 +555,18 @@ class PostgresStore(BaseStore):
         entities = json.loads(r[3]) if isinstance(r[3], str) else (r[3] or [])
         embedding = list(r[6]) if r[6] is not None else []
         return ProceduralMemory(
-            id=r[0], pattern=r[1], procedure=r[2],
-            entities=entities, acquisition_count=r[4], confidence=r[5],
+            id=r[0],
+            pattern=r[1],
+            procedure=r[2],
+            entities=entities,
+            acquisition_count=r[4],
+            confidence=r[5],
             embedding=embedding,
-            created_at=r[7], base_strength=r[8], decay_rate=r[9],
-            last_accessed=r[10], access_count=r[11],
+            created_at=r[7],
+            base_strength=r[8],
+            decay_rate=r[9],
+            last_accessed=r[10],
+            access_count=r[11],
             state=MemoryState(r[12]),
         )
 
@@ -487,7 +575,7 @@ class PostgresStore(BaseStore):
     def upsert_edge(self, edge: MemoryEdge) -> None:
         with self.conn.cursor() as cur:
             cur.execute(
-                f"""INSERT INTO {self._t('edges')}
+                f"""INSERT INTO {self._t("edges")}
                     (source_id, target_id, edge_type, weight, co_activation_count,
                      last_co_activated, created_at)
                     VALUES (%s,%s,%s,%s,%s,%s,%s)
@@ -496,9 +584,13 @@ class PostgresStore(BaseStore):
                         co_activation_count=EXCLUDED.co_activation_count,
                         last_co_activated=EXCLUDED.last_co_activated""",
                 (
-                    edge.source_id, edge.target_id, edge.edge_type.value,
-                    edge.weight, edge.co_activation_count,
-                    edge.last_co_activated, edge.created_at,
+                    edge.source_id,
+                    edge.target_id,
+                    edge.edge_type.value,
+                    edge.weight,
+                    edge.co_activation_count,
+                    edge.last_co_activated,
+                    edge.created_at,
                 ),
             )
 
@@ -518,7 +610,9 @@ class PostgresStore(BaseStore):
             )
             return [self._row_to_edge(r) for r in cur.fetchall()]
 
-    def get_edge(self, source_id: str, target_id: str, edge_type: EdgeType) -> MemoryEdge | None:
+    def get_edge(
+        self, source_id: str, target_id: str, edge_type: EdgeType
+    ) -> MemoryEdge | None:
         with self.conn.cursor() as cur:
             cur.execute(
                 f"SELECT {self._EDGE_COLS} FROM {self._t('edges')} WHERE source_id=%s AND target_id=%s AND edge_type=%s",
@@ -529,9 +623,13 @@ class PostgresStore(BaseStore):
 
     def _row_to_edge(self, r) -> MemoryEdge:
         return MemoryEdge(
-            source_id=r[0], target_id=r[1], edge_type=EdgeType(r[2]),
-            weight=r[3], co_activation_count=r[4],
-            last_co_activated=r[5], created_at=r[6],
+            source_id=r[0],
+            target_id=r[1],
+            edge_type=EdgeType(r[2]),
+            weight=r[3],
+            co_activation_count=r[4],
+            last_co_activated=r[5],
+            created_at=r[6],
         )
 
     # ── Conflict CRUD ──
@@ -541,22 +639,31 @@ class PostgresStore(BaseStore):
             cur.execute(
                 f"INSERT INTO {self._t('conflicts')} VALUES (%s,%s,%s,%s,%s,%s,%s,%s)",
                 (
-                    conflict.id, conflict.old_memory_id, conflict.new_memory_id,
-                    conflict.dimension, conflict.old_value, conflict.new_value,
-                    conflict.resolution, conflict.created_at,
+                    conflict.id,
+                    conflict.old_memory_id,
+                    conflict.new_memory_id,
+                    conflict.dimension,
+                    conflict.old_value,
+                    conflict.new_value,
+                    conflict.resolution,
+                    conflict.created_at,
                 ),
             )
 
     # ── Bulk / Maintenance ──
 
-    def get_all_active_units_for_decay(self) -> list[tuple[str, float, float, Any, int]]:
+    def get_all_active_units_for_decay(
+        self,
+    ) -> list[tuple[str, float, float, Any, int]]:
         with self.conn.cursor() as cur:
             cur.execute(
                 f"SELECT id, decay_rate, base_strength, last_accessed, access_count FROM {self._t('memory_units')} WHERE state='active'"
             )
             return cur.fetchall()
 
-    def get_all_active_observations_for_decay(self) -> list[tuple[str, float, float, Any, int]]:
+    def get_all_active_observations_for_decay(
+        self,
+    ) -> list[tuple[str, float, float, Any, int]]:
         with self.conn.cursor() as cur:
             cur.execute(
                 f"SELECT id, decay_rate, base_strength, last_accessed, access_count FROM {self._t('observations')} WHERE state='active'"

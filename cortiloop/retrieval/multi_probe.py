@@ -81,7 +81,7 @@ class MultiProbeRetriever:
 
         # Cross-encoder reranking (optional)
         if self.config.rerank_enabled and len(fused) > 0:
-            rerank_candidates = fused[:self.config.rerank_top_k]
+            rerank_candidates = fused[: self.config.rerank_top_k]
             try:
                 reranked = await self._rerank(query, rerank_candidates)
                 results = reranked[:top_k]
@@ -93,8 +93,11 @@ class MultiProbeRetriever:
 
         # Testing effect: strengthen accessed memories
         accessed_ids = [r["id"] for r in results]
-        for rid in accessed_ids:
-            self.store.update_unit_access(rid)
+        for r in results:
+            if r["type"] == "observation":
+                self.store.update_observation_access(r["id"])
+            elif r["type"] == "unit":
+                self.store.update_unit_access(r["id"])
         self.graph.strengthen_on_retrieval(accessed_ids)
 
         return results
@@ -118,8 +121,11 @@ class MultiProbeRetriever:
         # Search memory units
         for unit, sim in self.store.search_units_by_vector(query_emb, limit):
             entry = {
-                "id": unit.id, "type": "unit", "content": unit.content,
-                "score": sim, "entities": unit.entities,
+                "id": unit.id,
+                "type": "unit",
+                "content": unit.content,
+                "score": sim,
+                "entities": unit.entities,
             }
             if unit.session_timestamp:
                 entry["session_timestamp"] = unit.session_timestamp.strftime("%Y-%m-%d")
@@ -128,8 +134,11 @@ class MultiProbeRetriever:
         # Search observations
         for obs, sim in self.store.search_observations_by_vector(query_emb, limit):
             entry = {
-                "id": obs.id, "type": "observation", "content": obs.content,
-                "score": sim, "entities": obs.entities,
+                "id": obs.id,
+                "type": "observation",
+                "content": obs.content,
+                "score": sim,
+                "entities": obs.entities,
             }
             if obs.session_timestamp:
                 entry["session_timestamp"] = obs.session_timestamp.strftime("%Y-%m-%d")
@@ -137,18 +146,22 @@ class MultiProbeRetriever:
 
         # Search procedural memories
         for pm, sim in self.store.search_procedurals_by_vector(query_emb, limit // 4):
-            results.append({
-                "id": pm.id, "type": "procedural",
-                "content": f"[Pattern: {pm.pattern}] {pm.procedure}",
-                "score": sim, "entities": pm.entities,
-            })
+            results.append(
+                {
+                    "id": pm.id,
+                    "type": "procedural",
+                    "content": f"[Pattern: {pm.pattern}] {pm.procedure}",
+                    "score": sim,
+                    "entities": pm.entities,
+                }
+            )
 
         results.sort(key=lambda x: x["score"], reverse=True)
         return results[:limit]
 
     def _keyword_search(self, query: str, limit: int) -> list[dict]:
         # Extract keywords (simple: split on whitespace and punctuation)
-        keywords = [w for w in re.split(r'\W+', query) if len(w) > 1]
+        keywords = [w for w in re.split(r"\W+", query) if len(w) > 1]
         results = []
         seen = set()
 
@@ -157,11 +170,16 @@ class MultiProbeRetriever:
                 if unit.id not in seen:
                     seen.add(unit.id)
                     entry = {
-                        "id": unit.id, "type": "unit", "content": unit.content,
-                        "score": 1.0, "entities": unit.entities,
+                        "id": unit.id,
+                        "type": "unit",
+                        "content": unit.content,
+                        "score": 1.0,
+                        "entities": unit.entities,
                     }
                     if unit.session_timestamp:
-                        entry["session_timestamp"] = unit.session_timestamp.strftime("%Y-%m-%d")
+                        entry["session_timestamp"] = unit.session_timestamp.strftime(
+                            "%Y-%m-%d"
+                        )
                     results.append(entry)
 
         return results[:limit]
@@ -180,17 +198,24 @@ class MultiProbeRetriever:
 
         # Convert activated node IDs back to memory content
         results = []
-        for node_id, activation in sorted(activations.items(), key=lambda x: x[1], reverse=True):
+        for node_id, activation in sorted(
+            activations.items(), key=lambda x: x[1], reverse=True
+        ):
             if node_id in {r["id"] for r in seed_results}:
                 continue  # skip seeds (already in results)
             unit = self.store.get_unit(node_id)
             if unit:
                 entry = {
-                    "id": unit.id, "type": "unit", "content": unit.content,
-                    "score": activation, "entities": unit.entities,
+                    "id": unit.id,
+                    "type": "unit",
+                    "content": unit.content,
+                    "score": activation,
+                    "entities": unit.entities,
                 }
                 if unit.session_timestamp:
-                    entry["session_timestamp"] = unit.session_timestamp.strftime("%Y-%m-%d")
+                    entry["session_timestamp"] = unit.session_timestamp.strftime(
+                        "%Y-%m-%d"
+                    )
                 results.append(entry)
             if len(results) >= limit:
                 break
@@ -208,11 +233,16 @@ class MultiProbeRetriever:
         for unit in self.store.get_active_units(limit * 5):
             if start <= unit.created_at <= end:
                 entry = {
-                    "id": unit.id, "type": "unit", "content": unit.content,
-                    "score": 1.0, "entities": unit.entities,
+                    "id": unit.id,
+                    "type": "unit",
+                    "content": unit.content,
+                    "score": 1.0,
+                    "entities": unit.entities,
                 }
                 if unit.session_timestamp:
-                    entry["session_timestamp"] = unit.session_timestamp.strftime("%Y-%m-%d")
+                    entry["session_timestamp"] = unit.session_timestamp.strftime(
+                        "%Y-%m-%d"
+                    )
                 results.append(entry)
         return results[:limit]
 
