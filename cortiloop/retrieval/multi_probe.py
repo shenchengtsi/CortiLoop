@@ -127,10 +127,13 @@ class MultiProbeRetriever:
 
         # Search observations
         for obs, sim in self.store.search_observations_by_vector(query_emb, limit):
-            results.append({
+            entry = {
                 "id": obs.id, "type": "observation", "content": obs.content,
                 "score": sim, "entities": obs.entities,
-            })
+            }
+            if obs.session_timestamp:
+                entry["session_timestamp"] = obs.session_timestamp.strftime("%Y-%m-%d")
+            results.append(entry)
 
         # Search procedural memories
         for pm, sim in self.store.search_procedurals_by_vector(query_emb, limit // 4):
@@ -204,10 +207,13 @@ class MultiProbeRetriever:
         results = []
         for unit in self.store.get_active_units(limit * 5):
             if start <= unit.created_at <= end:
-                results.append({
+                entry = {
                     "id": unit.id, "type": "unit", "content": unit.content,
                     "score": 1.0, "entities": unit.entities,
-                })
+                }
+                if unit.session_timestamp:
+                    entry["session_timestamp"] = unit.session_timestamp.strftime("%Y-%m-%d")
+                results.append(entry)
         return results[:limit]
 
     @staticmethod

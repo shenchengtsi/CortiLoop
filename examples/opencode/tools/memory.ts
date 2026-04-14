@@ -13,7 +13,7 @@
  *   3. Copy ../package.json to .opencode/package.json
  *
  * Env vars (optional):
- *   CORTILOOP_DB_PATH     — SQLite path (default: ~/.opencode/cortiloop.db)
+ *   CORTILOOP_DB_PATH     — SQLite path (default: ~/.config/opencode/cortiloop.db)
  *   CORTILOOP_LLM_PROVIDER — openai | anthropic | ollama | local (default: local)
  *   CORTILOOP_LLM_MODEL   — Model name (default: provider default)
  *   CORTILOOP_NAMESPACE   — Tenant namespace (default: opencode)
@@ -31,7 +31,7 @@ async function bridge(
   const env = {
     ...process.env,
     CORTILOOP_DB_PATH:
-      process.env.CORTILOOP_DB_PATH || "~/.opencode/cortiloop.db",
+      process.env.CORTILOOP_DB_PATH || "~/.config/opencode/cortiloop.db",
     CORTILOOP_NAMESPACE: process.env.CORTILOOP_NAMESPACE || "opencode",
   }
 

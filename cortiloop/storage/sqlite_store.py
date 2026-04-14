@@ -74,6 +74,7 @@ class SQLiteStore(BaseStore):
                 entities TEXT,
                 embedding BLOB,
                 created_at timestamp,
+                session_timestamp timestamp,
                 base_strength REAL DEFAULT 1.0,
                 decay_rate REAL DEFAULT 0.1,
                 last_accessed timestamp,
@@ -93,6 +94,7 @@ class SQLiteStore(BaseStore):
                 embedding BLOB,
                 created_at timestamp,
                 updated_at timestamp,
+                session_timestamp timestamp,
                 base_strength REAL DEFAULT 1.0,
                 decay_rate REAL DEFAULT 0.03,
                 last_accessed timestamp,
@@ -153,6 +155,19 @@ class SQLiteStore(BaseStore):
                 ON edges_{ns}(target_id);
         """)
         self.conn.commit()
+
+        # ── Schema migration: add session_timestamp to existing tables ──
+        self._migrate_add_column(f"memory_units_{ns}", "session_timestamp", "timestamp")
+        self._migrate_add_column(f"observations_{ns}", "session_timestamp", "timestamp")
+
+    def _migrate_add_column(self, table: str, column: str, col_type: str):
+        """Add a column to an existing table if it doesn't exist yet."""
+        try:
+            self.conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {col_type}")
+            self.conn.commit()
+            logger.info("Migrated %s: added column %s", table, column)
+        except sqlite3.OperationalError:
+            pass  # column already exists
 
     # ── helpers ──
 
@@ -226,13 +241,23 @@ class SQLiteStore(BaseStore):
 
     def insert_unit(self, unit: MemoryUnit):
         self.conn.execute(
-            f"INSERT OR REPLACE INTO {self._t('memory_units')} VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            f"INSERT OR REPLACE INTO {self._t('memory_units')} VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
             (
-                unit.id, unit.content, unit.source_type.value, unit.importance_score,
-                json.dumps(unit.encoding_context.__dict__), json.dumps(unit.entities),
-                self._encode_embedding(unit.embedding), unit.created_at,
-                unit.base_strength, unit.decay_rate, unit.last_accessed,
-                unit.access_count, unit.state.value, unit.tier.value,
+                unit.id,
+                unit.content,
+                unit.source_type.value,
+                unit.importance_score,
+                json.dumps(unit.encoding_context.__dict__),
+                json.dumps(unit.entities),
+                self._encode_embedding(unit.embedding),
+                unit.created_at,
+                unit.session_timestamp,
+                unit.base_strength,
+                unit.decay_rate,
+                unit.last_accessed,
+                unit.access_count,
+                unit.state.value,
+                unit.tier.value,
             ),
         )
         self.conn.commit()
@@ -260,7 +285,9 @@ class SQLiteStore(BaseStore):
         ).fetchall()
         return [self._row_to_unit(r) for r in rows]
 
-    def search_units_by_vector(self, query_emb: list[float], top_k: int = 20) -> list[tuple[MemoryUnit, float]]:
+    def search_units_by_vector(
+        self, query_emb: list[float], top_k: int = 20
+    ) -> list[tuple[MemoryUnit, float]]:
         # Use vector index for fast ANN search
         hits = self._unit_index.search(query_emb, top_k)
         results = []
@@ -270,7 +297,9 @@ class SQLiteStore(BaseStore):
                 results.append((unit, sim))
         return results
 
-    def search_units_by_keyword(self, keyword: str, limit: int = 20) -> list[MemoryUnit]:
+    def search_units_by_keyword(
+        self, keyword: str, limit: int = 20
+    ) -> list[MemoryUnit]:
         rows = self.conn.execute(
             f"SELECT * FROM {self._t('memory_units')} WHERE state='active' AND content LIKE ? LIMIT ?",
             (f"%{keyword}%", limit),
@@ -303,33 +332,73 @@ class SQLiteStore(BaseStore):
             self._unit_index.remove(unit_id)
 
     def count_units(self) -> int:
-        row = self.conn.execute(f"SELECT COUNT(*) FROM {self._t('memory_units')}").fetchone()
+        row = self.conn.execute(
+            f"SELECT COUNT(*) FROM {self._t('memory_units')}"
+        ).fetchone()
         return row[0] if row else 0
 
     def _row_to_unit(self, r) -> MemoryUnit:
         ctx_dict = json.loads(r[4]) if r[4] else {}
+        # Backward-compatible: old schema has 14 cols (no session_timestamp)
+        if len(r) == 14:
+            return MemoryUnit(
+                id=r[0],
+                content=r[1],
+                source_type=SourceType(r[2]),
+                importance_score=r[3],
+                encoding_context=EncodingContext(**ctx_dict),
+                entities=json.loads(r[5]) if r[5] else [],
+                embedding=self._decode_embedding(r[6]),
+                created_at=r[7],
+                session_timestamp=None,
+                base_strength=r[8],
+                decay_rate=r[9],
+                last_accessed=r[10],
+                access_count=r[11],
+                state=MemoryState(r[12]),
+                tier=MemoryTier(r[13]),
+            )
         return MemoryUnit(
-            id=r[0], content=r[1], source_type=SourceType(r[2]),
-            importance_score=r[3], encoding_context=EncodingContext(**ctx_dict),
+            id=r[0],
+            content=r[1],
+            source_type=SourceType(r[2]),
+            importance_score=r[3],
+            encoding_context=EncodingContext(**ctx_dict),
             entities=json.loads(r[5]) if r[5] else [],
             embedding=self._decode_embedding(r[6]),
-            created_at=r[7], base_strength=r[8], decay_rate=r[9],
-            last_accessed=r[10], access_count=r[11],
-            state=MemoryState(r[12]), tier=MemoryTier(r[13]),
+            created_at=r[7],
+            session_timestamp=r[8],
+            base_strength=r[9],
+            decay_rate=r[10],
+            last_accessed=r[11],
+            access_count=r[12],
+            state=MemoryState(r[13]),
+            tier=MemoryTier(r[14]),
         )
 
     # ── Observation CRUD ──
 
     def insert_observation(self, obs: Observation):
         self.conn.execute(
-            f"INSERT OR REPLACE INTO {self._t('observations')} VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            f"INSERT OR REPLACE INTO {self._t('observations')} VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
             (
-                obs.id, obs.dimension, obs.content, obs.confidence, obs.version,
-                json.dumps(obs.source_unit_ids), json.dumps(obs.entities),
+                obs.id,
+                obs.dimension,
+                obs.content,
+                obs.confidence,
+                obs.version,
+                json.dumps(obs.source_unit_ids),
+                json.dumps(obs.entities),
                 self._encode_embedding(obs.embedding),
-                obs.created_at, obs.updated_at,
-                obs.base_strength, obs.decay_rate, obs.last_accessed,
-                obs.access_count, obs.state.value, json.dumps(obs.history),
+                obs.created_at,
+                obs.updated_at,
+                obs.session_timestamp,
+                obs.base_strength,
+                obs.decay_rate,
+                obs.last_accessed,
+                obs.access_count,
+                obs.state.value,
+                json.dumps(obs.history),
             ),
         )
         self.conn.commit()
@@ -349,7 +418,9 @@ class SQLiteStore(BaseStore):
         ).fetchall()
         return [self._row_to_observation(r) for r in rows]
 
-    def search_observations_by_vector(self, query_emb: list[float], top_k: int = 20) -> list[tuple[Observation, float]]:
+    def search_observations_by_vector(
+        self, query_emb: list[float], top_k: int = 20
+    ) -> list[tuple[Observation, float]]:
         hits = self._obs_index.search(query_emb, top_k)
         results = []
         for oid, sim in hits:
@@ -374,19 +445,51 @@ class SQLiteStore(BaseStore):
         self.conn.commit()
 
     def count_observations(self) -> int:
-        row = self.conn.execute(f"SELECT COUNT(*) FROM {self._t('observations')}").fetchone()
+        row = self.conn.execute(
+            f"SELECT COUNT(*) FROM {self._t('observations')}"
+        ).fetchone()
         return row[0] if row else 0
 
     def _row_to_observation(self, r) -> Observation:
+        # Backward-compatible: old schema has 16 cols (no session_timestamp)
+        if len(r) == 16:
+            return Observation(
+                id=r[0],
+                dimension=r[1],
+                content=r[2],
+                confidence=r[3],
+                version=r[4],
+                source_unit_ids=json.loads(r[5]) if r[5] else [],
+                entities=json.loads(r[6]) if r[6] else [],
+                embedding=self._decode_embedding(r[7]),
+                created_at=r[8],
+                updated_at=r[9],
+                session_timestamp=None,
+                base_strength=r[10],
+                decay_rate=r[11],
+                last_accessed=r[12],
+                access_count=r[13],
+                state=MemoryState(r[14]),
+                history=json.loads(r[15]) if r[15] else [],
+            )
         return Observation(
-            id=r[0], dimension=r[1], content=r[2], confidence=r[3], version=r[4],
+            id=r[0],
+            dimension=r[1],
+            content=r[2],
+            confidence=r[3],
+            version=r[4],
             source_unit_ids=json.loads(r[5]) if r[5] else [],
             entities=json.loads(r[6]) if r[6] else [],
             embedding=self._decode_embedding(r[7]),
-            created_at=r[8], updated_at=r[9],
-            base_strength=r[10], decay_rate=r[11], last_accessed=r[12],
-            access_count=r[13], state=MemoryState(r[14]),
-            history=json.loads(r[15]) if r[15] else [],
+            created_at=r[8],
+            updated_at=r[9],
+            session_timestamp=r[10],
+            base_strength=r[11],
+            decay_rate=r[12],
+            last_accessed=r[13],
+            access_count=r[14],
+            state=MemoryState(r[15]),
+            history=json.loads(r[16]) if r[16] else [],
         )
 
     # ── ProceduralMemory CRUD ──
@@ -395,11 +498,19 @@ class SQLiteStore(BaseStore):
         self.conn.execute(
             f"INSERT OR REPLACE INTO {self._t('procedural_memories')} VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
             (
-                pm.id, pm.pattern, pm.procedure, json.dumps(pm.entities),
-                pm.acquisition_count, pm.confidence,
+                pm.id,
+                pm.pattern,
+                pm.procedure,
+                json.dumps(pm.entities),
+                pm.acquisition_count,
+                pm.confidence,
                 self._encode_embedding(pm.embedding),
-                pm.created_at, pm.base_strength, pm.decay_rate,
-                pm.last_accessed, pm.access_count, pm.state.value,
+                pm.created_at,
+                pm.base_strength,
+                pm.decay_rate,
+                pm.last_accessed,
+                pm.access_count,
+                pm.state.value,
             ),
         )
         self.conn.commit()
@@ -413,7 +524,9 @@ class SQLiteStore(BaseStore):
         ).fetchall()
         return [self._row_to_procedural(r) for r in rows]
 
-    def search_procedurals_by_vector(self, query_emb: list[float], top_k: int = 5) -> list[tuple[ProceduralMemory, float]]:
+    def search_procedurals_by_vector(
+        self, query_emb: list[float], top_k: int = 5
+    ) -> list[tuple[ProceduralMemory, float]]:
         hits = self._proc_index.search(query_emb, top_k)
         results = []
         for pid, sim in hits:
@@ -430,12 +543,18 @@ class SQLiteStore(BaseStore):
 
     def _row_to_procedural(self, r) -> ProceduralMemory:
         return ProceduralMemory(
-            id=r[0], pattern=r[1], procedure=r[2],
+            id=r[0],
+            pattern=r[1],
+            procedure=r[2],
             entities=json.loads(r[3]) if r[3] else [],
-            acquisition_count=r[4], confidence=r[5],
+            acquisition_count=r[4],
+            confidence=r[5],
             embedding=self._decode_embedding(r[6]),
-            created_at=r[7], base_strength=r[8], decay_rate=r[9],
-            last_accessed=r[10], access_count=r[11],
+            created_at=r[7],
+            base_strength=r[8],
+            decay_rate=r[9],
+            last_accessed=r[10],
+            access_count=r[11],
             state=MemoryState(r[12]),
         )
 
@@ -443,15 +562,19 @@ class SQLiteStore(BaseStore):
 
     def upsert_edge(self, edge: MemoryEdge):
         self.conn.execute(
-            f"""INSERT INTO {self._t('edges')} VALUES (?,?,?,?,?,?,?)
+            f"""INSERT INTO {self._t("edges")} VALUES (?,?,?,?,?,?,?)
                 ON CONFLICT(source_id, target_id, edge_type) DO UPDATE SET
                     weight=excluded.weight,
                     co_activation_count=excluded.co_activation_count,
                     last_co_activated=excluded.last_co_activated""",
             (
-                edge.source_id, edge.target_id, edge.edge_type.value,
-                edge.weight, edge.co_activation_count,
-                edge.last_co_activated, edge.created_at,
+                edge.source_id,
+                edge.target_id,
+                edge.edge_type.value,
+                edge.weight,
+                edge.co_activation_count,
+                edge.last_co_activated,
+                edge.created_at,
             ),
         )
         self.conn.commit()
@@ -470,7 +593,9 @@ class SQLiteStore(BaseStore):
         ).fetchall()
         return [self._row_to_edge(r) for r in rows]
 
-    def get_edge(self, source_id: str, target_id: str, edge_type: EdgeType) -> MemoryEdge | None:
+    def get_edge(
+        self, source_id: str, target_id: str, edge_type: EdgeType
+    ) -> MemoryEdge | None:
         row = self.conn.execute(
             f"SELECT * FROM {self._t('edges')} WHERE source_id=? AND target_id=? AND edge_type=?",
             (source_id, target_id, edge_type.value),
@@ -479,9 +604,13 @@ class SQLiteStore(BaseStore):
 
     def _row_to_edge(self, r) -> MemoryEdge:
         return MemoryEdge(
-            source_id=r[0], target_id=r[1], edge_type=EdgeType(r[2]),
-            weight=r[3], co_activation_count=r[4],
-            last_co_activated=r[5], created_at=r[6],
+            source_id=r[0],
+            target_id=r[1],
+            edge_type=EdgeType(r[2]),
+            weight=r[3],
+            co_activation_count=r[4],
+            last_co_activated=r[5],
+            created_at=r[6],
         )
 
     # ── Conflict CRUD ──
@@ -490,23 +619,32 @@ class SQLiteStore(BaseStore):
         self.conn.execute(
             f"INSERT INTO {self._t('conflicts')} VALUES (?,?,?,?,?,?,?,?)",
             (
-                conflict.id, conflict.old_memory_id, conflict.new_memory_id,
-                conflict.dimension, conflict.old_value, conflict.new_value,
-                conflict.resolution, conflict.created_at,
+                conflict.id,
+                conflict.old_memory_id,
+                conflict.new_memory_id,
+                conflict.dimension,
+                conflict.old_value,
+                conflict.new_value,
+                conflict.resolution,
+                conflict.created_at,
             ),
         )
         self.conn.commit()
 
     # ── Bulk / Maintenance ──
 
-    def get_all_active_units_for_decay(self) -> list[tuple[str, float, float, str, int]]:
+    def get_all_active_units_for_decay(
+        self,
+    ) -> list[tuple[str, float, float, str, int]]:
         """Returns (id, decay_rate, base_strength, last_accessed_iso, access_count) for active units."""
         rows = self.conn.execute(
             f"SELECT id, decay_rate, base_strength, last_accessed, access_count FROM {self._t('memory_units')} WHERE state='active'"
         ).fetchall()
         return rows
 
-    def get_all_active_observations_for_decay(self) -> list[tuple[str, float, float, str, int]]:
+    def get_all_active_observations_for_decay(
+        self,
+    ) -> list[tuple[str, float, float, str, int]]:
         rows = self.conn.execute(
             f"SELECT id, decay_rate, base_strength, last_accessed, access_count FROM {self._t('observations')} WHERE state='active'"
         ).fetchall()

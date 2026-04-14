@@ -103,6 +103,14 @@ EXISTING OBSERVATIONS:
         )
 
         now = datetime.now()
+
+        # Derive session_timestamp from source units (use the latest one)
+        latest_session_ts = None
+        for u in new_units:
+            if u.session_timestamp:
+                if latest_session_ts is None or u.session_timestamp > latest_session_ts:
+                    latest_session_ts = u.session_timestamp
+
         for action in result.get("actions", []):
             if action["type"] == "create":
                 embedding = await self.embedder.embed_one(action["content"])
@@ -114,6 +122,7 @@ EXISTING OBSERVATIONS:
                     embedding=embedding,
                     created_at=now,
                     updated_at=now,
+                    session_timestamp=latest_session_ts,
                     last_accessed=now,
                     decay_rate=self.store.config.decay.semantic_rate,
                 )
@@ -135,4 +144,7 @@ EXISTING OBSERVATIONS:
                     existing.source_unit_ids.extend(action.get("source_unit_ids", []))
                     existing.entities = list(set(existing.entities + action.get("entities", [])))
                     existing.embedding = await self.embedder.embed_one(action["content"])
+                    # Update session_timestamp to the latest
+                    if latest_session_ts:
+                        existing.session_timestamp = latest_session_ts
                     self.store.insert_observation(existing)

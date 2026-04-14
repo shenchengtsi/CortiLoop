@@ -38,7 +38,7 @@ PACKAGE_JSON = {
 
 
 def _opencode_mcp_config(
-    db_path: str = "~/.opencode/cortiloop.db",
+    db_path: str = "~/.config/opencode/cortiloop.db",
     namespace: str = "opencode",
     provider: str = "local",
 ) -> dict[str, Any]:
@@ -234,7 +234,7 @@ def print_setup_guide():
 
   -- Env vars --
 
-    CORTILOOP_DB_PATH       SQLite path (default: ~/.opencode/cortiloop.db)
+    CORTILOOP_DB_PATH       SQLite path (default: ~/.config/opencode/cortiloop.db)
     CORTILOOP_LLM_PROVIDER  openai | anthropic | ollama | local
     CORTILOOP_LLM_MODEL     Model name
     CORTILOOP_API_KEY        API key (for openai/anthropic)

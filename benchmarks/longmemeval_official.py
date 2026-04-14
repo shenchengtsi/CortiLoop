@@ -243,9 +243,12 @@ async def generate_answer_llm(
     question_date: str | None = None,
 ) -> str:
     """Generate answer from recalled memories using the LLM."""
-    # Build context from recall results
+    # Build context from recall results — sort by date (newest first) for temporal clarity
+    dated = [(r, r.get("session_timestamp", "")) for r in recall_results]
+    dated.sort(key=lambda x: x[1] if x[1] else "", reverse=True)
+
     context_parts = []
-    for i, r in enumerate(recall_results, 1):
+    for i, (r, _) in enumerate(dated, 1):
         content = r.get("content", "")
         score = r.get("score", 0)
         mem_type = r.get("type", "unknown")
@@ -261,9 +264,16 @@ async def generate_answer_llm(
         "You are a helpful assistant answering questions based on retrieved memories "
         "from previous conversations. Answer concisely based only on the provided context.\n\n"
         "Important rules:\n"
-        "- When memories contain CONFLICTING information, prefer the MORE RECENT one (check dates).\n"
-        "- For counting or totaling questions, FIRST list ALL relevant items found, THEN give the total.\n"
-        "- If the context doesn't contain enough information, say so."
+        "- When memories contain CONFLICTING information about the same topic (e.g. different numbers, "
+        "different statuses, different locations), ALWAYS use the MORE RECENT one. "
+        "Memories are sorted newest-first; trust the first (most recent) version you see.\n"
+        "- For counting or totaling questions: list EVERY individual item found separately, "
+        "number them, then give the total. Do NOT merge items unless they are EXACTLY the same. "
+        "Different events, purchases, or items mentioned in separate memories are DISTINCT.\n"
+        "- If the context contains ANY relevant information, use it to give the BEST answer possible. "
+        "Only say 'not enough information' if the context contains ZERO relevant information about the question.\n"
+        "- When the question asks for a recommendation or suggestion, use any information about user "
+        "preferences, habits, or past experiences found in the memories to personalize your answer."
     )
 
     user_prompt = f"""Based on the following retrieved memories, answer the question.
@@ -441,7 +451,7 @@ async def run_single_question(
             r"how many|how much|total|in total|combined|altogether",
             re.IGNORECASE,
         )
-        recall_k = 50 if _AGG_PATTERN.search(question) else 20
+        recall_k = 100 if _AGG_PATTERN.search(question) else 20
 
         t0 = time.perf_counter()
         recall_results = await loop.recall(question, top_k=recall_k)
@@ -574,14 +584,16 @@ async def run_benchmark(
                 config.llm.base_url = base_url
             if api_key:
                 config.llm.api_key = api_key
-            if provider == "local":
-                config.llm.embedding_dim = embedding_dim
-            elif provider == "ollama":
-                config.llm.embedding_dim = 768
+            config.llm.embedding_dim = embedding_dim
+            if provider == "ollama":
                 config.llm.embedding_model = "nomic-embed-text"
 
             # Disable attention gate for benchmark (ingest everything)
             config.attention_gate.enabled = False
+
+            # Enable cross-encoder reranking for better retrieval precision
+            config.retrieval.rerank_enabled = True
+            config.retrieval.rerank_top_k = 80
 
             result = await run_single_question(item, config, provider, use_llm_judge)
 

@@ -89,6 +89,9 @@ class Observation:
     created_at: datetime = field(default_factory=datetime.now)
     updated_at: datetime = field(default_factory=datetime.now)
 
+    # Original session timestamp (inherited from source units)
+    session_timestamp: datetime | None = None
+
     # Strength & decay (semantic decays slower)
     base_strength: float = 1.0
     decay_rate: float = 0.03

@@ -6,7 +6,7 @@
       "type": "local",
       "command": ["python", "-m", "cortiloop.adapters.mcp_server"],
       "environment": {
-        "CORTILOOP_DB_PATH": "~/.opencode/cortiloop.db",
+        "CORTILOOP_DB_PATH": "~/.config/opencode/cortiloop.db",
         "CORTILOOP_NAMESPACE": "opencode",
         "CORTILOOP_LLM_PROVIDER": "local"
       },

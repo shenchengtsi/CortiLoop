@@ -88,6 +88,7 @@ class PostgresStore(BaseStore):
                     entities JSONB,
                     embedding vector({dim}),
                     created_at TIMESTAMPTZ,
+                    session_timestamp TIMESTAMPTZ,
                     base_strength REAL DEFAULT 1.0,
                     decay_rate REAL DEFAULT 0.1,
                     last_accessed TIMESTAMPTZ,
@@ -108,6 +109,7 @@ class PostgresStore(BaseStore):
                     embedding vector({dim}),
                     created_at TIMESTAMPTZ,
                     updated_at TIMESTAMPTZ,
+                    session_timestamp TIMESTAMPTZ,
                     base_strength REAL DEFAULT 1.0,
                     decay_rate REAL DEFAULT 0.03,
                     last_accessed TIMESTAMPTZ,
@@ -183,6 +185,21 @@ class PostgresStore(BaseStore):
                 WHERE state = 'active'
             """)
 
+        # ── Schema migration: add session_timestamp to existing tables ──
+        self._migrate_add_column(f"memory_units_{ns}", "session_timestamp", "TIMESTAMPTZ")
+        self._migrate_add_column(f"observations_{ns}", "session_timestamp", "TIMESTAMPTZ")
+
+    def _migrate_add_column(self, table: str, column: str, col_type: str):
+        """Add a column to an existing table if it doesn't exist yet."""
+        with self.conn.cursor() as cur:
+            cur.execute(
+                "SELECT 1 FROM information_schema.columns WHERE table_name=%s AND column_name=%s",
+                (table, column),
+            )
+            if not cur.fetchone():
+                cur.execute(f"ALTER TABLE {table} ADD COLUMN {column} {col_type}")
+                logger.info("Migrated %s: added column %s", table, column)
+
     def _t(self, table: str) -> str:
         return f"{table}_{self._ns}"
 
@@ -193,9 +210,9 @@ class PostgresStore(BaseStore):
             cur.execute(
                 f"""INSERT INTO {self._t('memory_units')}
                     (id, content, source_type, importance_score, encoding_context,
-                     entities, embedding, created_at, base_strength, decay_rate,
-                     last_accessed, access_count, state, tier)
-                    VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+                     entities, embedding, created_at, session_timestamp, base_strength,
+                     decay_rate, last_accessed, access_count, state, tier)
+                    VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
                     ON CONFLICT (id) DO UPDATE SET
                         content=EXCLUDED.content, embedding=EXCLUDED.embedding,
                         state=EXCLUDED.state""",
@@ -203,8 +220,9 @@ class PostgresStore(BaseStore):
                     unit.id, unit.content, unit.source_type.value, unit.importance_score,
                     json.dumps(unit.encoding_context.__dict__), json.dumps(unit.entities),
                     unit.embedding if unit.embedding else None,
-                    unit.created_at, unit.base_strength, unit.decay_rate,
-                    unit.last_accessed, unit.access_count, unit.state.value, unit.tier.value,
+                    unit.created_at, unit.session_timestamp, unit.base_strength,
+                    unit.decay_rate, unit.last_accessed, unit.access_count,
+                    unit.state.value, unit.tier.value,
                 ),
             )
 
@@ -287,9 +305,10 @@ class PostgresStore(BaseStore):
             id=r[0], content=r[1], source_type=SourceType(r[2]),
             importance_score=r[3], encoding_context=EncodingContext(**ctx_dict),
             entities=entities, embedding=embedding,
-            created_at=r[7], base_strength=r[8], decay_rate=r[9],
-            last_accessed=r[10], access_count=r[11],
-            state=MemoryState(r[12]), tier=MemoryTier(r[13]),
+            created_at=r[7], session_timestamp=r[8],
+            base_strength=r[9], decay_rate=r[10],
+            last_accessed=r[11], access_count=r[12],
+            state=MemoryState(r[13]), tier=MemoryTier(r[14]),
         )
 
     # ── Observation CRUD ──
@@ -299,19 +318,19 @@ class PostgresStore(BaseStore):
             cur.execute(
                 f"""INSERT INTO {self._t('observations')}
                     (id, dimension, content, confidence, version, source_unit_ids,
-                     entities, embedding, created_at, updated_at, base_strength,
-                     decay_rate, last_accessed, access_count, state, history)
-                    VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+                     entities, embedding, created_at, updated_at, session_timestamp,
+                     base_strength, decay_rate, last_accessed, access_count, state, history)
+                    VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
                     ON CONFLICT (id) DO UPDATE SET
                         content=EXCLUDED.content, confidence=EXCLUDED.confidence,
                         version=EXCLUDED.version, embedding=EXCLUDED.embedding,
-                        updated_at=EXCLUDED.updated_at, history=EXCLUDED.history,
-                        state=EXCLUDED.state""",
+                        updated_at=EXCLUDED.updated_at, session_timestamp=EXCLUDED.session_timestamp,
+                        history=EXCLUDED.history, state=EXCLUDED.state""",
                 (
                     obs.id, obs.dimension, obs.content, obs.confidence, obs.version,
                     json.dumps(obs.source_unit_ids), json.dumps(obs.entities),
                     obs.embedding if obs.embedding else None,
-                    obs.created_at, obs.updated_at,
+                    obs.created_at, obs.updated_at, obs.session_timestamp,
                     obs.base_strength, obs.decay_rate, obs.last_accessed,
                     obs.access_count, obs.state.value, json.dumps(obs.history),
                 ),
@@ -372,13 +391,13 @@ class PostgresStore(BaseStore):
         source_ids = json.loads(r[5]) if isinstance(r[5], str) else (r[5] or [])
         entities = json.loads(r[6]) if isinstance(r[6], str) else (r[6] or [])
         embedding = list(r[7]) if r[7] is not None else []
-        history = json.loads(r[15]) if isinstance(r[15], str) else (r[15] or [])
+        history = json.loads(r[16]) if isinstance(r[16], str) else (r[16] or [])
         return Observation(
             id=r[0], dimension=r[1], content=r[2], confidence=r[3], version=r[4],
             source_unit_ids=source_ids, entities=entities, embedding=embedding,
-            created_at=r[8], updated_at=r[9],
-            base_strength=r[10], decay_rate=r[11], last_accessed=r[12],
-            access_count=r[13], state=MemoryState(r[14]),
+            created_at=r[8], updated_at=r[9], session_timestamp=r[10],
+            base_strength=r[11], decay_rate=r[12], last_accessed=r[13],
+            access_count=r[14], state=MemoryState(r[15]),
             history=history,
         )
 
