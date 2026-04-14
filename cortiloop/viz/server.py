@@ -166,13 +166,14 @@ class VizAPI:
         elif category == "archive_units":
             ns = self.store.config.namespace
             rows = self.store.conn.execute(
-                f"SELECT * FROM memory_units_{ns} WHERE state != 'active' ORDER BY created_at DESC"
+                f"SELECT id, content, entities, created_at, base_strength, access_count, state"
+                f" FROM memory_units_{ns} WHERE state != 'active' ORDER BY created_at DESC"
             ).fetchall()
             return [{
                 "id": r[0], "content": r[1], "type": "unit",
-                "state": r[12], "strength": round(r[8], 3) if r[8] else 0,
-                "access_count": r[11] or 0, "entities": json.loads(r[5]) if r[5] else [],
-                "created": r[7].isoformat() if r[7] else "",
+                "state": r[6], "strength": round(r[4], 3) if r[4] else 0,
+                "access_count": r[5] or 0, "entities": json.loads(r[2]) if r[2] else [],
+                "created": r[3].isoformat() if r[3] else "",
             } for r in rows]
         elif category == "total_edges":
             # Build ID→content lookup for resolving edge endpoints

@@ -44,6 +44,31 @@ sqlite3.register_converter("timestamp", _convert_datetime)
 class SQLiteStore(BaseStore):
     """Storage using SQLite for persistence + pluggable vector index for ANN search."""
 
+    # Canonical column order — all SELECTs use these instead of SELECT *
+    _UNIT_COLS = (
+        "id, content, source_type, importance_score, encoding_context, "
+        "entities, embedding, created_at, session_timestamp, base_strength, "
+        "decay_rate, last_accessed, access_count, state, tier"
+    )
+    _OBS_COLS = (
+        "id, dimension, content, confidence, version, source_unit_ids, "
+        "entities, embedding, created_at, updated_at, session_timestamp, "
+        "base_strength, decay_rate, last_accessed, access_count, state, history"
+    )
+    _PROC_COLS = (
+        "id, pattern, procedure, entities, acquisition_count, confidence, "
+        "embedding, created_at, base_strength, decay_rate, last_accessed, "
+        "access_count, state"
+    )
+    _EDGE_COLS = (
+        "source_id, target_id, edge_type, weight, co_activation_count, "
+        "last_co_activated, created_at"
+    )
+    _CONFLICT_COLS = (
+        "id, old_memory_id, new_memory_id, dimension, old_value, "
+        "new_value, resolution, created_at"
+    )
+
     def __init__(self, config: CortiLoopConfig):
         self.config = config
         self.conn = sqlite3.connect(
@@ -241,7 +266,7 @@ class SQLiteStore(BaseStore):
 
     def insert_unit(self, unit: MemoryUnit):
         self.conn.execute(
-            f"INSERT OR REPLACE INTO {self._t('memory_units')} VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            f"INSERT OR REPLACE INTO {self._t('memory_units')} ({self._UNIT_COLS}) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
             (
                 unit.id,
                 unit.content,
@@ -267,20 +292,20 @@ class SQLiteStore(BaseStore):
 
     def get_unit(self, unit_id: str) -> MemoryUnit | None:
         row = self.conn.execute(
-            f"SELECT * FROM {self._t('memory_units')} WHERE id=?", (unit_id,)
+            f"SELECT {self._UNIT_COLS} FROM {self._t('memory_units')} WHERE id=?", (unit_id,)
         ).fetchone()
         return self._row_to_unit(row) if row else None
 
     def get_active_units(self, limit: int = 1000) -> list[MemoryUnit]:
         rows = self.conn.execute(
-            f"SELECT * FROM {self._t('memory_units')} WHERE state='active' ORDER BY created_at DESC LIMIT ?",
+            f"SELECT {self._UNIT_COLS} FROM {self._t('memory_units')} WHERE state='active' ORDER BY created_at DESC LIMIT ?",
             (limit,),
         ).fetchall()
         return [self._row_to_unit(r) for r in rows]
 
     def get_recent_units(self, limit: int = 50) -> list[MemoryUnit]:
         rows = self.conn.execute(
-            f"SELECT * FROM {self._t('memory_units')} WHERE state='active' ORDER BY created_at DESC LIMIT ?",
+            f"SELECT {self._UNIT_COLS} FROM {self._t('memory_units')} WHERE state='active' ORDER BY created_at DESC LIMIT ?",
             (limit,),
         ).fetchall()
         return [self._row_to_unit(r) for r in rows]
@@ -301,14 +326,14 @@ class SQLiteStore(BaseStore):
         self, keyword: str, limit: int = 20
     ) -> list[MemoryUnit]:
         rows = self.conn.execute(
-            f"SELECT * FROM {self._t('memory_units')} WHERE state='active' AND content LIKE ? LIMIT ?",
+            f"SELECT {self._UNIT_COLS} FROM {self._t('memory_units')} WHERE state='active' AND content LIKE ? LIMIT ?",
             (f"%{keyword}%", limit),
         ).fetchall()
         return [self._row_to_unit(r) for r in rows]
 
     def search_units_by_entity(self, entity: str, limit: int = 50) -> list[MemoryUnit]:
         rows = self.conn.execute(
-            f"SELECT * FROM {self._t('memory_units')} WHERE state='active' AND entities LIKE ? LIMIT ?",
+            f"SELECT {self._UNIT_COLS} FROM {self._t('memory_units')} WHERE state='active' AND entities LIKE ? LIMIT ?",
             (f'%"{entity}"%', limit),
         ).fetchall()
         return [self._row_to_unit(r) for r in rows]
@@ -338,26 +363,8 @@ class SQLiteStore(BaseStore):
         return row[0] if row else 0
 
     def _row_to_unit(self, r) -> MemoryUnit:
+        """Convert row from explicit SELECT _UNIT_COLS query — column order is guaranteed."""
         ctx_dict = json.loads(r[4]) if r[4] else {}
-        # Backward-compatible: old schema has 14 cols (no session_timestamp)
-        if len(r) == 14:
-            return MemoryUnit(
-                id=r[0],
-                content=r[1],
-                source_type=SourceType(r[2]),
-                importance_score=r[3],
-                encoding_context=EncodingContext(**ctx_dict),
-                entities=json.loads(r[5]) if r[5] else [],
-                embedding=self._decode_embedding(r[6]),
-                created_at=r[7],
-                session_timestamp=None,
-                base_strength=r[8],
-                decay_rate=r[9],
-                last_accessed=r[10],
-                access_count=r[11],
-                state=MemoryState(r[12]),
-                tier=MemoryTier(r[13]),
-            )
         return MemoryUnit(
             id=r[0],
             content=r[1],
@@ -380,7 +387,7 @@ class SQLiteStore(BaseStore):
 
     def insert_observation(self, obs: Observation):
         self.conn.execute(
-            f"INSERT OR REPLACE INTO {self._t('observations')} VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            f"INSERT OR REPLACE INTO {self._t('observations')} ({self._OBS_COLS}) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
             (
                 obs.id,
                 obs.dimension,
@@ -407,13 +414,13 @@ class SQLiteStore(BaseStore):
 
     def get_observation(self, obs_id: str) -> Observation | None:
         row = self.conn.execute(
-            f"SELECT * FROM {self._t('observations')} WHERE id=?", (obs_id,)
+            f"SELECT {self._OBS_COLS} FROM {self._t('observations')} WHERE id=?", (obs_id,)
         ).fetchone()
         return self._row_to_observation(row) if row else None
 
     def get_active_observations(self, limit: int = 500) -> list[Observation]:
         rows = self.conn.execute(
-            f"SELECT * FROM {self._t('observations')} WHERE state='active' ORDER BY updated_at DESC LIMIT ?",
+            f"SELECT {self._OBS_COLS} FROM {self._t('observations')} WHERE state='active' ORDER BY updated_at DESC LIMIT ?",
             (limit,),
         ).fetchall()
         return [self._row_to_observation(r) for r in rows]
@@ -431,7 +438,7 @@ class SQLiteStore(BaseStore):
 
     def search_observations_by_dimension(self, dimension: str) -> list[Observation]:
         rows = self.conn.execute(
-            f"SELECT * FROM {self._t('observations')} WHERE state='active' AND dimension=?",
+            f"SELECT {self._OBS_COLS} FROM {self._t('observations')} WHERE state='active' AND dimension=?",
             (dimension,),
         ).fetchall()
         return [self._row_to_observation(r) for r in rows]
@@ -451,27 +458,7 @@ class SQLiteStore(BaseStore):
         return row[0] if row else 0
 
     def _row_to_observation(self, r) -> Observation:
-        # Backward-compatible: old schema has 16 cols (no session_timestamp)
-        if len(r) == 16:
-            return Observation(
-                id=r[0],
-                dimension=r[1],
-                content=r[2],
-                confidence=r[3],
-                version=r[4],
-                source_unit_ids=json.loads(r[5]) if r[5] else [],
-                entities=json.loads(r[6]) if r[6] else [],
-                embedding=self._decode_embedding(r[7]),
-                created_at=r[8],
-                updated_at=r[9],
-                session_timestamp=None,
-                base_strength=r[10],
-                decay_rate=r[11],
-                last_accessed=r[12],
-                access_count=r[13],
-                state=MemoryState(r[14]),
-                history=json.loads(r[15]) if r[15] else [],
-            )
+        """Convert row from explicit SELECT _OBS_COLS query — column order is guaranteed."""
         return Observation(
             id=r[0],
             dimension=r[1],
@@ -496,7 +483,7 @@ class SQLiteStore(BaseStore):
 
     def insert_procedural(self, pm: ProceduralMemory):
         self.conn.execute(
-            f"INSERT OR REPLACE INTO {self._t('procedural_memories')} VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            f"INSERT OR REPLACE INTO {self._t('procedural_memories')} ({self._PROC_COLS}) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
             (
                 pm.id,
                 pm.pattern,
@@ -519,7 +506,7 @@ class SQLiteStore(BaseStore):
 
     def get_active_procedurals(self, limit: int = 100) -> list[ProceduralMemory]:
         rows = self.conn.execute(
-            f"SELECT * FROM {self._t('procedural_memories')} WHERE state='active' ORDER BY confidence DESC LIMIT ?",
+            f"SELECT {self._PROC_COLS} FROM {self._t('procedural_memories')} WHERE state='active' ORDER BY confidence DESC LIMIT ?",
             (limit,),
         ).fetchall()
         return [self._row_to_procedural(r) for r in rows]
@@ -537,7 +524,7 @@ class SQLiteStore(BaseStore):
 
     def _get_procedural(self, proc_id: str) -> ProceduralMemory | None:
         row = self.conn.execute(
-            f"SELECT * FROM {self._t('procedural_memories')} WHERE id=?", (proc_id,)
+            f"SELECT {self._PROC_COLS} FROM {self._t('procedural_memories')} WHERE id=?", (proc_id,)
         ).fetchone()
         return self._row_to_procedural(row) if row else None
 
@@ -581,14 +568,14 @@ class SQLiteStore(BaseStore):
 
     def get_edges_from(self, source_id: str) -> list[MemoryEdge]:
         rows = self.conn.execute(
-            f"SELECT * FROM {self._t('edges')} WHERE source_id=? ORDER BY weight DESC",
+            f"SELECT {self._EDGE_COLS} FROM {self._t('edges')} WHERE source_id=? ORDER BY weight DESC",
             (source_id,),
         ).fetchall()
         return [self._row_to_edge(r) for r in rows]
 
     def get_edges_to(self, target_id: str) -> list[MemoryEdge]:
         rows = self.conn.execute(
-            f"SELECT * FROM {self._t('edges')} WHERE target_id=? ORDER BY weight DESC",
+            f"SELECT {self._EDGE_COLS} FROM {self._t('edges')} WHERE target_id=? ORDER BY weight DESC",
             (target_id,),
         ).fetchall()
         return [self._row_to_edge(r) for r in rows]
@@ -597,7 +584,7 @@ class SQLiteStore(BaseStore):
         self, source_id: str, target_id: str, edge_type: EdgeType
     ) -> MemoryEdge | None:
         row = self.conn.execute(
-            f"SELECT * FROM {self._t('edges')} WHERE source_id=? AND target_id=? AND edge_type=?",
+            f"SELECT {self._EDGE_COLS} FROM {self._t('edges')} WHERE source_id=? AND target_id=? AND edge_type=?",
             (source_id, target_id, edge_type.value),
         ).fetchone()
         return self._row_to_edge(row) if row else None

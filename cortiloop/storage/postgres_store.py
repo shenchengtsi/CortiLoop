@@ -203,6 +203,27 @@ class PostgresStore(BaseStore):
     def _t(self, table: str) -> str:
         return f"{table}_{self._ns}"
 
+    # Canonical column order — all SELECTs use these instead of SELECT *
+    _UNIT_COLS = (
+        "id, content, source_type, importance_score, encoding_context, "
+        "entities, embedding, created_at, session_timestamp, base_strength, "
+        "decay_rate, last_accessed, access_count, state, tier"
+    )
+    _OBS_COLS = (
+        "id, dimension, content, confidence, version, source_unit_ids, "
+        "entities, embedding, created_at, updated_at, session_timestamp, "
+        "base_strength, decay_rate, last_accessed, access_count, state, history"
+    )
+    _PROC_COLS = (
+        "id, pattern, procedure, entities, acquisition_count, confidence, "
+        "embedding, created_at, base_strength, decay_rate, last_accessed, "
+        "access_count, state"
+    )
+    _EDGE_COLS = (
+        "source_id, target_id, edge_type, weight, co_activation_count, "
+        "last_co_activated, created_at"
+    )
+
     # ── MemoryUnit CRUD ──
 
     def insert_unit(self, unit: MemoryUnit) -> None:
@@ -228,14 +249,14 @@ class PostgresStore(BaseStore):
 
     def get_unit(self, unit_id: str) -> MemoryUnit | None:
         with self.conn.cursor() as cur:
-            cur.execute(f"SELECT * FROM {self._t('memory_units')} WHERE id=%s", (unit_id,))
+            cur.execute(f"SELECT {self._UNIT_COLS} FROM {self._t('memory_units')} WHERE id=%s", (unit_id,))
             row = cur.fetchone()
             return self._row_to_unit(row) if row else None
 
     def get_active_units(self, limit: int = 1000) -> list[MemoryUnit]:
         with self.conn.cursor() as cur:
             cur.execute(
-                f"SELECT * FROM {self._t('memory_units')} WHERE state='active' ORDER BY created_at DESC LIMIT %s",
+                f"SELECT {self._UNIT_COLS} FROM {self._t('memory_units')} WHERE state='active' ORDER BY created_at DESC LIMIT %s",
                 (limit,),
             )
             return [self._row_to_unit(r) for r in cur.fetchall()]
@@ -246,7 +267,7 @@ class PostgresStore(BaseStore):
     def search_units_by_vector(self, query_emb: list[float], top_k: int = 20) -> list[tuple[MemoryUnit, float]]:
         with self.conn.cursor() as cur:
             cur.execute(
-                f"""SELECT *, 1 - (embedding <=> %s::vector) as similarity
+                f"""SELECT {self._UNIT_COLS}, 1 - (embedding <=> %s::vector) as similarity
                     FROM {self._t('memory_units')}
                     WHERE state='active' AND embedding IS NOT NULL
                     ORDER BY embedding <=> %s::vector
@@ -263,7 +284,7 @@ class PostgresStore(BaseStore):
     def search_units_by_keyword(self, keyword: str, limit: int = 20) -> list[MemoryUnit]:
         with self.conn.cursor() as cur:
             cur.execute(
-                f"SELECT * FROM {self._t('memory_units')} WHERE state='active' AND content ILIKE %s LIMIT %s",
+                f"SELECT {self._UNIT_COLS} FROM {self._t('memory_units')} WHERE state='active' AND content ILIKE %s LIMIT %s",
                 (f"%{keyword}%", limit),
             )
             return [self._row_to_unit(r) for r in cur.fetchall()]
@@ -271,7 +292,7 @@ class PostgresStore(BaseStore):
     def search_units_by_entity(self, entity: str, limit: int = 50) -> list[MemoryUnit]:
         with self.conn.cursor() as cur:
             cur.execute(
-                f"SELECT * FROM {self._t('memory_units')} WHERE state='active' AND entities ? %s LIMIT %s",
+                f"SELECT {self._UNIT_COLS} FROM {self._t('memory_units')} WHERE state='active' AND entities ? %s LIMIT %s",
                 (entity, limit),
             )
             return [self._row_to_unit(r) for r in cur.fetchall()]
@@ -338,14 +359,14 @@ class PostgresStore(BaseStore):
 
     def get_observation(self, obs_id: str) -> Observation | None:
         with self.conn.cursor() as cur:
-            cur.execute(f"SELECT * FROM {self._t('observations')} WHERE id=%s", (obs_id,))
+            cur.execute(f"SELECT {self._OBS_COLS} FROM {self._t('observations')} WHERE id=%s", (obs_id,))
             row = cur.fetchone()
             return self._row_to_observation(row) if row else None
 
     def get_active_observations(self, limit: int = 500) -> list[Observation]:
         with self.conn.cursor() as cur:
             cur.execute(
-                f"SELECT * FROM {self._t('observations')} WHERE state='active' ORDER BY updated_at DESC LIMIT %s",
+                f"SELECT {self._OBS_COLS} FROM {self._t('observations')} WHERE state='active' ORDER BY updated_at DESC LIMIT %s",
                 (limit,),
             )
             return [self._row_to_observation(r) for r in cur.fetchall()]
@@ -353,7 +374,7 @@ class PostgresStore(BaseStore):
     def search_observations_by_vector(self, query_emb: list[float], top_k: int = 20) -> list[tuple[Observation, float]]:
         with self.conn.cursor() as cur:
             cur.execute(
-                f"""SELECT *, 1 - (embedding <=> %s::vector) as similarity
+                f"""SELECT {self._OBS_COLS}, 1 - (embedding <=> %s::vector) as similarity
                     FROM {self._t('observations')}
                     WHERE state='active' AND embedding IS NOT NULL
                     ORDER BY embedding <=> %s::vector
@@ -370,7 +391,7 @@ class PostgresStore(BaseStore):
     def search_observations_by_dimension(self, dimension: str) -> list[Observation]:
         with self.conn.cursor() as cur:
             cur.execute(
-                f"SELECT * FROM {self._t('observations')} WHERE state='active' AND dimension=%s",
+                f"SELECT {self._OBS_COLS} FROM {self._t('observations')} WHERE state='active' AND dimension=%s",
                 (dimension,),
             )
             return [self._row_to_observation(r) for r in cur.fetchall()]
@@ -427,7 +448,7 @@ class PostgresStore(BaseStore):
     def get_active_procedurals(self, limit: int = 100) -> list[ProceduralMemory]:
         with self.conn.cursor() as cur:
             cur.execute(
-                f"SELECT * FROM {self._t('procedural_memories')} WHERE state='active' ORDER BY confidence DESC LIMIT %s",
+                f"SELECT {self._PROC_COLS} FROM {self._t('procedural_memories')} WHERE state='active' ORDER BY confidence DESC LIMIT %s",
                 (limit,),
             )
             return [self._row_to_procedural(r) for r in cur.fetchall()]
@@ -435,7 +456,7 @@ class PostgresStore(BaseStore):
     def search_procedurals_by_vector(self, query_emb: list[float], top_k: int = 5) -> list[tuple[ProceduralMemory, float]]:
         with self.conn.cursor() as cur:
             cur.execute(
-                f"""SELECT *, 1 - (embedding <=> %s::vector) as similarity
+                f"""SELECT {self._PROC_COLS}, 1 - (embedding <=> %s::vector) as similarity
                     FROM {self._t('procedural_memories')}
                     WHERE state='active' AND embedding IS NOT NULL
                     ORDER BY embedding <=> %s::vector
@@ -484,7 +505,7 @@ class PostgresStore(BaseStore):
     def get_edges_from(self, source_id: str) -> list[MemoryEdge]:
         with self.conn.cursor() as cur:
             cur.execute(
-                f"SELECT * FROM {self._t('edges')} WHERE source_id=%s ORDER BY weight DESC",
+                f"SELECT {self._EDGE_COLS} FROM {self._t('edges')} WHERE source_id=%s ORDER BY weight DESC",
                 (source_id,),
             )
             return [self._row_to_edge(r) for r in cur.fetchall()]
@@ -492,7 +513,7 @@ class PostgresStore(BaseStore):
     def get_edges_to(self, target_id: str) -> list[MemoryEdge]:
         with self.conn.cursor() as cur:
             cur.execute(
-                f"SELECT * FROM {self._t('edges')} WHERE target_id=%s ORDER BY weight DESC",
+                f"SELECT {self._EDGE_COLS} FROM {self._t('edges')} WHERE target_id=%s ORDER BY weight DESC",
                 (target_id,),
             )
             return [self._row_to_edge(r) for r in cur.fetchall()]
@@ -500,7 +521,7 @@ class PostgresStore(BaseStore):
     def get_edge(self, source_id: str, target_id: str, edge_type: EdgeType) -> MemoryEdge | None:
         with self.conn.cursor() as cur:
             cur.execute(
-                f"SELECT * FROM {self._t('edges')} WHERE source_id=%s AND target_id=%s AND edge_type=%s",
+                f"SELECT {self._EDGE_COLS} FROM {self._t('edges')} WHERE source_id=%s AND target_id=%s AND edge_type=%s",
                 (source_id, target_id, edge_type.value),
             )
             row = cur.fetchone()
