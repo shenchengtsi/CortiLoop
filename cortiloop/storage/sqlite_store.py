@@ -74,6 +74,7 @@ class SQLiteStore(BaseStore):
         self.conn = sqlite3.connect(
             config.db_path,
             detect_types=sqlite3.PARSE_DECLTYPES,
+            check_same_thread=False,
         )
         self.conn.execute("PRAGMA journal_mode=WAL")
         self.conn.execute("PRAGMA foreign_keys=ON")
