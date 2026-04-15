@@ -1,0 +1,21 @@
+name: cortiloop
+version: 1.0.0
+description: >
+  CortiLoop bioinspired memory — auto-recall before each turn,
+  auto-retain after each turn, plus manual tools for recall/retain/reflect/stats.
+provides_tools:
+  - cortiloop_recall
+  - cortiloop_retain
+  - cortiloop_reflect
+  - cortiloop_stats
+provides_hooks:
+  - pre_llm_call
+  - post_llm_call
+requires_env:
+  - name: CORTILOOP_DB_PATH
+    description: "Path to shared CortiLoop SQLite database"
+  - name: CORTILOOP_LLM_PROVIDER
+    description: "LLM provider for attention gate (e.g. openai, local)"
+  - name: CORTILOOP_API_KEY
+    description: "API key for the LLM provider"
+    secret: true
